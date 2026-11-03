@@ -1,0 +1,6 @@
+data_root: /scratch/jp09/dd9648/datasets_video_hallu
+output_root: /scratch/hn98/dd9648/Video-TL-DPO/outputs
+frames: 8
+resolution: 448
+seed: 0
+target_verified_only: true

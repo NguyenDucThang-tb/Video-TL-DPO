@@ -1,0 +1,18 @@
+#!/bin/bash
+#PBS -N video_tldpo_vanilla
+#PBS -P hn98
+#PBS -q gpuvolta
+#PBS -l ngpus=1
+#PBS -l walltime=12:00:00
+#PBS -l mem=64GB
+#PBS -j oe
+set -euo pipefail
+PROJECT=/scratch/hn98/dd9648/Video-TL-DPO
+ENV=${VIDEO_TLDPO_ENV:-$PROJECT/.venv}
+export HF_HOME=${HF_HOME:-$PROJECT/cache/huggingface}
+export TRANSFORMERS_CACHE=${TRANSFORMERS_CACHE:-$HF_HOME/transformers}
+mkdir -p "$PROJECT/outputs/vanilla_dpo" "$HF_HOME"
+source "$ENV/bin/activate"
+cd "$PROJECT"
+python -m video_tldpo.cli validate --input "$PROJECT/artifacts/train_binary.jsonl" --rejected "$PROJECT/artifacts/train_binary.rejected.jsonl"
+python scripts/train.py --config configs/vanilla_dpo.yaml

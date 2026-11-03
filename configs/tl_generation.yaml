@@ -1,0 +1,3 @@
+mode: target_generation_only
+beta: 0.1
+target_verified_only: true

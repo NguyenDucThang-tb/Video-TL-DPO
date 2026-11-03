@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-tl-dpo"
+version = "0.1.0"
+description = "Video adaptation of target-learning DPO for hallucination mitigation"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "PyYAML>=6.0", "Pillow>=9.0"]
+
+[project.optional-dependencies]
+gpu = ["torch>=2.2", "transformers>=4.49", "peft>=0.14", "accelerate>=1.0", "decord>=0.6"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

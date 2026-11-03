@@ -1,0 +1,4 @@
+mode: target_condition_only
+beta: 0.1
+lambda_condition: 1.0
+target_verified_only: true

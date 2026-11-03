@@ -1,0 +1,11 @@
+#!/bin/bash
+#PBS -N video_tldpo_tlgen
+#PBS -P hn98
+#PBS -q gpuvolta
+#PBS -l ngpus=1
+#PBS -l walltime=24:00:00
+#PBS -l mem=96GB
+#PBS -j oe
+set -euo pipefail
+PROJECT=/scratch/hn98/dd9648/Video-TL-DPO; source "${VIDEO_TLDPO_ENV:-$PROJECT/.venv}/bin/activate"; cd "$PROJECT"
+python scripts/train.py --config configs/tl_generation.yaml

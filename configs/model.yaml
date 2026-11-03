@@ -1,0 +1,5 @@
+model_id: Qwen/Qwen2.5-VL-7B-Instruct
+lora_r: 16
+lora_alpha: 32
+resolution: 448
+frames: 8

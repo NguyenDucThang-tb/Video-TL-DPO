@@ -157,6 +157,9 @@ def test_video_sampled_fps_and_prompt_boundary(monkeypatch):
 
     def process_vision(messages, return_video_kwargs):
         assert return_video_kwargs is True
+        request = messages[0]["content"][0]
+        assert "nframes" not in request
+        assert request["min_frames"] == request["max_frames"] == 8
         return None, [torch.zeros(8, 3, 2, 2)], {"fps": [0.25]}
 
     class Processor:
@@ -175,6 +178,23 @@ def test_video_sampled_fps_and_prompt_boundary(monkeypatch):
     batch = encode(prompt + "Yes.", torch.device("cpu"))
     assert seen == [[0.25], [0.25]]
     assert batch["second_per_grid_ts"] == [8.0]
+
+
+@pytest.mark.parametrize("total_frames, expected", [(2, 2), (3, 2), (5, 4), (6, 6), (7, 6), (8, 8), (120, 8)])
+def test_short_video_sampling_with_real_qwen_utils(total_frames, expected):
+    vision = pytest.importorskip("qwen_vl_utils.vision_process")
+    request = resume.video_sampling_spec("fixture.mp4")
+    actual = vision.smart_nframes(request, total_frames=total_frames, video_fps=30.0)
+    assert actual == expected
+    assert actual <= total_frames and actual % vision.FRAME_FACTOR == 0
+    if total_frames >= 8:
+        assert actual == vision.smart_nframes({"nframes": 8}, total_frames=total_frames, video_fps=30.0)
+
+
+def test_old_fixed_frame_request_reproduces_reported_error():
+    vision = pytest.importorskip("qwen_vl_utils.vision_process")
+    with pytest.raises(ValueError, match=r"interval \[2, 6\].*8"):
+        vision.smart_nframes({"nframes": 8}, total_frames=6, video_fps=30.0)
 
 
 def submit_fixture(tmp_path):

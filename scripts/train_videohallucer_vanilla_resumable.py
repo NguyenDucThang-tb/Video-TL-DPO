@@ -92,12 +92,23 @@ def load_rows(path: Path) -> list[dict]:
     return rows
 
 
+def video_sampling_spec(video_path: str):
+    """Request 8 uniform frames, capped to the clip's available even count.
+
+    qwen-vl-utils clamps the FPS/min/max route to the available frame count;
+    its explicit nframes route raises when a clip contains fewer frames.
+    For clips with at least 8 frames, both routes select the same 8 indices.
+    """
+    return {"type": "video", "video": video_path, "fps": 2.0,
+            "min_frames": SETTINGS["frames"], "max_frames": SETTINGS["frames"]}
+
+
 def make_inputs(processor, row: dict):
     from qwen_vl_utils import process_vision_info
     messages = [{
         "role": "user",
         "content": [
-            {"type": "video", "video": row["video_path"], "nframes": SETTINGS["frames"]},
+            video_sampling_spec(row["video_path"]),
             {"type": "text", "text": row["question"] + " Answer yes or no."},
         ],
     }]
@@ -111,6 +122,12 @@ def make_inputs(processor, row: dict):
     values = fps if isinstance(fps, (list, tuple)) else [fps]
     if not values or not all(x is not None and math.isfinite(float(x)) and float(x) > 0 for x in values):
         raise RuntimeError("Video reader returned invalid sampled FPS")
+    sampled_frames = int(video_inputs[0].shape[0])
+    if not 2 <= sampled_frames <= SETTINGS["frames"] or sampled_frames % 2:
+        raise RuntimeError(f"Invalid sampled video frame count: {sampled_frames}")
+    if sampled_frames < SETTINGS["frames"]:
+        print("short_video_sampling:", row["video_path"],
+              f"sampled_frames={sampled_frames}", f"sampled_fps={fps}", flush=True)
 
     def process(text):
         batch = processor(
@@ -256,6 +273,7 @@ def write_summary(output, state, records, checkpoint=None):
     temporary = output / "train_summary.json.tmp"
     temporary.write_text(json.dumps({
         "status": "COMPLETED", "records": records, "frames": SETTINGS["frames"],
+        "frame_policy": "uniform_up_to_requested_even",
         "contract": state["contract"],
         "loss_first": losses[0], "loss_last": losses[-1],
         "loss_min": min(losses), "loss_max": max(losses),

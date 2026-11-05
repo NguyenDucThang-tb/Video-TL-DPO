@@ -1,0 +1,44 @@
+#!/bin/bash
+#PBS -N vtdpo_vh_eval
+#PBS -P hn98
+#PBS -q gpuhopper
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=64GB
+#PBS -l walltime=01:00:00
+#PBS -l jobfs=20GB
+#PBS -l storage=gdata/hn98+scratch/jp09
+#PBS -j oe
+
+set -euo pipefail
+JOB_START_EPOCH=$(date +%s)
+PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/dd9648/Video-TL-DPO}
+VARIANT=${VIDEO_TLDPO_EVAL_VARIANT:?Expected base or adapter}
+case "$VARIANT" in base|adapter) ;; *) echo "Invalid evaluation variant" >&2; exit 1 ;; esac
+ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-/g/data/hn98/envs/dd9648_qwen25_vtdpo_v2.tar.gz}
+ENV_ROOT="$PBS_JOBFS/qwen25_eval_env"
+mkdir -p /g/data/hn98/dd9648/logs
+exec > "/g/data/hn98/dd9648/logs/vanilla_val_${VARIANT}_${PBS_JOBID}.log" 2>&1
+
+echo "job_id=$PBS_JOBID variant=$VARIANT"
+python3 "$PROJECT/scripts/evaluate_videohallucer_validation.py" --preflight-only
+hostname
+nvidia-smi
+mkdir -p "$ENV_ROOT"
+tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
+unset PYTHONHOME
+export PYTHONNOUSERSITE=1
+"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
+export PATH="$ENV_ROOT/bin:$PATH"
+export CONDA_PREFIX="$ENV_ROOT"
+export CONDA_DEFAULT_ENV="$ENV_ROOT"
+export HF_HOME=/g/data/hn98/dd9648/hf_cache
+export XDG_CACHE_HOME=/g/data/hn98/dd9648/cache
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH="$PROJECT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/evaluate_videohallucer_validation.py" \
+    --variant "$VARIANT" --max-seconds 2700 \
+    --deadline-epoch "$((JOB_START_EPOCH + 2700))"

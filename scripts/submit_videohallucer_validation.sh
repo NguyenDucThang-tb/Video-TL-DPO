@@ -29,7 +29,7 @@ if [ "$SPLIT" = test ]; then
 fi
 if [ "$DATASET" = eventhallusion ]; then
     JOB_NAME=vtdpo_eh_eval
-    RESULT_FOLDER=eventhallusion_vanilla_dpo_v1
+    RESULT_FOLDER=eventhallusion_vanilla_dpo_v2
 fi
 export VIDEO_TLDPO_PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/dd9648/Video-TL-DPO}
 PROJECT="$VIDEO_TLDPO_PROJECT"

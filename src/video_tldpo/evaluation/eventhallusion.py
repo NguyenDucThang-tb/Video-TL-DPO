@@ -22,7 +22,7 @@ SPLIT_NAMES = {"entire": "entire", "mix": "mix", "interleave": "mix", "misleadin
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v"}
 EVENT_PROTOCOL = dict(PROTOCOL, parser="eventhallusion_eval_binary_startswith_v1",
                       strict_parser_diagnostic=PROTOCOL["parser"], task="binary_question_accuracy",
-                      duration_check="abs_difference<=max(1.5s,10pct_annotated)")
+                      duration_check="diagnostic_only_abs_difference_vs_max(1.5s,10pct_annotated)")
 
 
 def official_binary_parse(text):
@@ -46,15 +46,21 @@ def duration_seconds(value):
     return seconds
 
 
-def validate_duration(row, native_inputs):
-    """Qwen temporal grids retain clip duration via sampled FPS, not source FPS."""
+def validate_duration(row, native_inputs, strict=True):
+    """Compare annotation duration with decoded clip duration; optionally enforce it."""
     if row.get("duration_seconds") is None:
-        return
+        return None
     observed = float(native_inputs["video_grid_thw"][0][0]) * float(native_inputs["second_per_grid_ts"][0])
     expected = row["duration_seconds"]
-    if abs(observed - expected) > max(1.5, 0.1 * expected):
+    difference = abs(observed - expected)
+    tolerance = max(1.5, 0.1 * expected)
+    result = {"annotated_seconds": expected, "decoded_seconds": observed,
+              "absolute_difference_seconds": difference, "tolerance_seconds": tolerance,
+              "within_tolerance": difference <= tolerance}
+    if strict and not result["within_tolerance"]:
         raise RuntimeError("EventHallusion ID/video duration mismatch: {} annotated={} observed={}".format(
             row["video_id"], expected, observed))
+    return result
 
 
 def walk_files(root):

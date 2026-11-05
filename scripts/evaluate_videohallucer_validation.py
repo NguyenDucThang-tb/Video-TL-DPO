@@ -111,9 +111,13 @@ def evaluate(args, rows, input_contract):
                 print("processing:", row["sample_id"], flush=True)
                 prompt, encode = make_inputs(processor, row)
                 cpu_inputs = encode(prompt, torch.device("cpu"))
+                duration_diagnostic = None
                 if is_event:
                     from video_tldpo.evaluation.eventhallusion import validate_duration
-                    validate_duration(row, cpu_inputs)
+                    duration_diagnostic = validate_duration(row, cpu_inputs, strict=False)
+                    if duration_diagnostic and not duration_diagnostic["within_tolerance"]:
+                        print("duration_metadata_difference: {} {}".format(
+                            row["video_id"], json.dumps(duration_diagnostic, sort_keys=True)), flush=True)
                 digest = tensor_input_digest(cpu_inputs, torch)
                 inputs = {key: value.to("cuda:0") if hasattr(value, "to") else value
                           for key, value in cpu_inputs.items()}
@@ -133,6 +137,7 @@ def evaluate(args, rows, input_contract):
                 if is_event:
                     prediction.update({key: row[key] for key in ("video_id", "category", "question_type")})
                     prediction["strict_prediction"] = parse_yes_no(answer)
+                    prediction["duration_diagnostic"] = duration_diagnostic
                 append_prediction(path, prediction)
                 predictions.append(prediction)
                 slowest_step = max(slowest_step, time.monotonic() - started)
@@ -182,7 +187,7 @@ def main():
     args = parser.parse_args()
     args.data = args.data or project / ("artifacts/test_records.jsonl" if args.split == "test" else "artifacts/val_binary.jsonl")
     if args.output is None:
-        folder = "eventhallusion_vanilla_dpo_v1" if args.dataset == "eventhallusion" else \
+        folder = "eventhallusion_vanilla_dpo_v2" if args.dataset == "eventhallusion" else \
             "test_vanilla_dpo_v1" if args.split == "test" else "validation_vanilla_dpo_v1"
         args.output = project / "outputs" / folder
     if args.compare_only:

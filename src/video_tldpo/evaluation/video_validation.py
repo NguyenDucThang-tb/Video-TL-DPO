@@ -59,35 +59,8 @@ def validate_rows(rows, split, expected):
     return pairs
 
 
-def validate_inputs(data, train_data, model, adapter, train_summary, manifest=None,
-                    split="val", validation_data=None):
-    if split not in ("val", "test"):
-        raise ValueError("Evaluation split must be val or test")
-    data, train_data, model, adapter, train_summary = map(
-        Path, (data, train_data, model, adapter, train_summary))
-    rows, train_rows = read_jsonl(data), read_jsonl(train_data)
-    expected = 100 if split == "val" else 310
-    eval_pairs = validate_rows(rows, split, expected)
-    train_pairs = validate_rows(train_rows, "train", 300)
-    manifest = Path(manifest) if manifest is not None else data.parent / "split_manifest.json"
-    split_ids = json.loads(manifest.read_text())["pair_ids"]
-    if set(split_ids["train"]) != set(train_pairs) or set(split_ids[split]) != set(eval_pairs):
-        raise ValueError("Records differ from the published split manifest")
-    train_videos = {str(Path(r["video_path"]).resolve()) for r in train_rows}
-    eval_videos = {str(Path(r["video_path"]).resolve()) for r in rows}
-    if train_videos & eval_videos or set(train_pairs) & set(eval_pairs):
-        raise ValueError("Train/evaluation video or pair leakage detected")
-    validation_digest = None
-    if split == "test":
-        validation_data = Path(validation_data) if validation_data is not None else data.parent / "val_binary.jsonl"
-        val_rows = read_jsonl(validation_data)
-        val_pairs = validate_rows(val_rows, "val", 100)
-        val_videos = {str(Path(r["video_path"]).resolve()) for r in val_rows}
-        if set(val_pairs) != set(split_ids["val"]):
-            raise ValueError("Validation records differ from the published manifest")
-        if eval_videos & val_videos or train_videos & val_videos or set(eval_pairs) & set(val_pairs) or set(train_pairs) & set(val_pairs):
-            raise ValueError("Train/validation/test video or pair leakage detected")
-        validation_digest = file_sha256(validation_data)
+def trained_adapter_contract(train_data, model, adapter, train_summary):
+    train_data, model, adapter, train_summary = map(Path, (train_data, model, adapter, train_summary))
     config = json.loads((model / "config.json").read_text())
     if config.get("model_type") != "qwen2_5_vl":
         raise ValueError("Expected Qwen2.5-VL")
@@ -116,14 +89,47 @@ def validate_inputs(data, train_data, model, adapter, train_summary, manifest=No
                    ("config.json", "model.safetensors.index.json", "preprocessor_config.json")}
     if state["contract"].get("model_files") != model_files:
         raise ValueError("Evaluation model differs from the training base model")
-    inputs = {
-        "validation_sha256": file_sha256(data), "train_sha256": train_digest,
-        "manifest_sha256": file_sha256(manifest),
+    return {
+        "train_sha256": train_digest,
         "model_files": model_files, "adapter_sha256": file_sha256(adapter / "adapter_model.safetensors"),
         "adapter_config_sha256": file_sha256(adapter / "adapter_config.json"),
+    }
+
+
+def validate_inputs(data, train_data, model, adapter, train_summary, manifest=None,
+                    split="val", validation_data=None):
+    if split not in ("val", "test"):
+        raise ValueError("Evaluation split must be val or test")
+    data, train_data = map(Path, (data, train_data))
+    rows, train_rows = read_jsonl(data), read_jsonl(train_data)
+    expected = 100 if split == "val" else 310
+    eval_pairs = validate_rows(rows, split, expected)
+    train_pairs = validate_rows(train_rows, "train", 300)
+    manifest = Path(manifest) if manifest is not None else data.parent / "split_manifest.json"
+    split_ids = json.loads(manifest.read_text())["pair_ids"]
+    if set(split_ids["train"]) != set(train_pairs) or set(split_ids[split]) != set(eval_pairs):
+        raise ValueError("Records differ from the published split manifest")
+    train_videos = {str(Path(r["video_path"]).resolve()) for r in train_rows}
+    eval_videos = {str(Path(r["video_path"]).resolve()) for r in rows}
+    if train_videos & eval_videos or set(train_pairs) & set(eval_pairs):
+        raise ValueError("Train/evaluation video or pair leakage detected")
+    validation_digest = None
+    if split == "test":
+        validation_data = Path(validation_data) if validation_data is not None else data.parent / "val_binary.jsonl"
+        val_rows = read_jsonl(validation_data)
+        val_pairs = validate_rows(val_rows, "val", 100)
+        val_videos = {str(Path(r["video_path"]).resolve()) for r in val_rows}
+        if set(val_pairs) != set(split_ids["val"]):
+            raise ValueError("Validation records differ from the published manifest")
+        if eval_videos & val_videos or train_videos & val_videos or set(eval_pairs) & set(val_pairs) or set(train_pairs) & set(val_pairs):
+            raise ValueError("Train/validation/test video or pair leakage detected")
+        validation_digest = file_sha256(validation_data)
+    inputs = trained_adapter_contract(train_data, model, adapter, train_summary)
+    inputs.update({
+        "validation_sha256": file_sha256(data), "manifest_sha256": file_sha256(manifest),
         "counts": {split + "_records": expected, split + "_pairs": len(eval_pairs), split + "_videos": len(eval_videos),
                    "train_records": 300, "train_videos": len(train_videos), "video_overlap": 0},
-    }
+    })
     if split == "test":
         inputs.update(evaluation_split="test", expected_records=expected,
                       test_sha256=inputs["validation_sha256"], validation_sha256=validation_digest)
@@ -176,7 +182,7 @@ def initialize_output(directory, contract):
         atomic_json(metadata, contract)
 
 
-def restore_predictions(path, expected_rows):
+def restore_predictions(path, expected_rows, parser=parse_yes_no):
     path = Path(path)
     if not path.exists():
         return []
@@ -199,7 +205,7 @@ def restore_predictions(path, expected_rows):
             if prediction.get(key) != row[key]:
                 raise ValueError("Prediction order/content differs at " + row["sample_id"])
         gt = row["gt_answer"].strip().lower()
-        parsed = parse_yes_no(prediction["raw_answer"])
+        parsed = parser(prediction["raw_answer"])
         if prediction.get("gt_answer") != gt or prediction.get("prediction") != parsed \
                 or prediction.get("correct") != (parsed == gt) or not prediction.get("input_digest"):
             raise ValueError("Prediction scoring/provenance is inconsistent")

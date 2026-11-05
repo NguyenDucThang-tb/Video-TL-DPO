@@ -17,13 +17,17 @@ VARIANT=${VIDEO_TLDPO_EVAL_VARIANT:?Expected base or adapter}
 case "$VARIANT" in base|adapter) ;; *) echo "Invalid evaluation variant" >&2; exit 1 ;; esac
 SPLIT=${VIDEO_TLDPO_EVAL_SPLIT:-val}
 case "$SPLIT" in val|test) ;; *) echo "Invalid evaluation split" >&2; exit 1 ;; esac
+DATASET=${VIDEO_TLDPO_EVAL_DATASET:-videohallucer}
+case "$DATASET" in videohallucer|eventhallusion) ;; *) echo "Invalid evaluation dataset" >&2; exit 1 ;; esac
+PREFIX="vanilla_${SPLIT}"
+if [ "$DATASET" = eventhallusion ]; then PREFIX=eventhallusion; fi
 ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-/g/data/hn98/envs/dd9648_qwen25_vtdpo_v2.tar.gz}
 ENV_ROOT="$PBS_JOBFS/qwen25_eval_env"
 mkdir -p /g/data/hn98/dd9648/logs
-exec > "/g/data/hn98/dd9648/logs/vanilla_${SPLIT}_${VARIANT}_${PBS_JOBID}.log" 2>&1
+exec > "/g/data/hn98/dd9648/logs/${PREFIX}_${VARIANT}_${PBS_JOBID}.log" 2>&1
 
-echo "job_id=$PBS_JOBID split=$SPLIT variant=$VARIANT"
-python3 "$PROJECT/scripts/evaluate_videohallucer_validation.py" --split "$SPLIT" --preflight-only
+echo "job_id=$PBS_JOBID dataset=$DATASET split=$SPLIT variant=$VARIANT"
+python3 "$PROJECT/scripts/evaluate_videohallucer_validation.py" --dataset "$DATASET" --split "$SPLIT" --preflight-only
 hostname
 nvidia-smi
 mkdir -p "$ENV_ROOT"
@@ -42,5 +46,5 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH="$PROJECT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/evaluate_videohallucer_validation.py" \
-    --split "$SPLIT" --variant "$VARIANT" --max-seconds 2700 \
+    --dataset "$DATASET" --split "$SPLIT" --variant "$VARIANT" --max-seconds 2700 \
     --deadline-epoch "$((JOB_START_EPOCH + 2700))"

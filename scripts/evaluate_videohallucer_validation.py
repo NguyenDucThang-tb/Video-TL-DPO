@@ -40,7 +40,8 @@ def print_comparison(root):
         "wrong_to_correct": result["wrong_to_correct"],
         "correct_to_wrong": result["correct_to_wrong"],
     }, indent=2), flush=True)
-    print("VALIDATION_COMPARISON: PASS", root / "comparison.json", flush=True)
+    label = "TEST" if result["split"] == "test" else "VALIDATION"
+    print(label + "_COMPARISON: PASS", root / "comparison.json", flush=True)
 
 
 def evaluate(args, rows, input_contract):
@@ -122,9 +123,10 @@ def evaluate(args, rows, input_contract):
         atomic_json(output / "metrics.json", metrics)
         print(json.dumps(metrics, indent=2), flush=True)
         if metrics["status"] != "COMPLETED":
-            print("VALIDATION_PARTIAL: saved predictions; rerun the same evaluation command", flush=True)
+            print(args.split.upper() + "_PARTIAL: saved predictions; rerun the same evaluation command", flush=True)
             return 3
-        print("VALIDATION_{}: PASS".format(args.variant.upper()), flush=True)
+        label = "TEST" if args.split == "test" else "VALIDATION"
+        print("{}_{}: PASS".format(label, args.variant.upper()), flush=True)
 
     if args.variant == "adapter":
         print_comparison(args.output)
@@ -135,30 +137,35 @@ def main():
     project = Path(os.environ.get("VIDEO_TLDPO_PROJECT", "/g/data/hn98/dd9648/Video-TL-DPO"))
     training = project / "outputs/vanilla_dpo_qwen25_vh_continuous_v2"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=Path, default=project / "artifacts/val_binary.jsonl")
+    parser.add_argument("--split", choices=("val", "test"), default=os.environ.get("VIDEO_TLDPO_EVAL_SPLIT", "val"))
+    parser.add_argument("--data", type=Path)
+    parser.add_argument("--validation-data", type=Path, default=project / "artifacts/val_binary.jsonl")
     parser.add_argument("--train-data", type=Path, default=project / "artifacts/train_binary.jsonl")
     parser.add_argument("--manifest", type=Path, default=project / "artifacts/split_manifest.json")
     parser.add_argument("--model", type=Path, default=Path(os.environ.get(
         "VIDEO_TLDPO_MODEL", "/g/data/hn98/dd9648/models/Qwen2.5-VL-7B-Instruct")))
     parser.add_argument("--adapter", type=Path, default=training / "trainer_state/latest/adapter")
     parser.add_argument("--train-summary", type=Path, default=training / "train_summary.json")
-    parser.add_argument("--output", type=Path, default=project / "outputs/validation_vanilla_dpo_v1")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--variant", choices=("base", "adapter"), default="base")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--compare-only", action="store_true")
     parser.add_argument("--max-seconds", type=int, default=2700)
     parser.add_argument("--deadline-epoch", type=float)
     args = parser.parse_args()
+    args.data = args.data or project / ("artifacts/test_records.jsonl" if args.split == "test" else "artifacts/val_binary.jsonl")
+    args.output = args.output or project / ("outputs/test_vanilla_dpo_v1" if args.split == "test" else "outputs/validation_vanilla_dpo_v1")
     if args.compare_only:
         print_comparison(args.output)
         return 0
     if args.max_seconds <= 120:
         parser.error("max-seconds must exceed 120")
     try:
-        rows, inputs = validate_inputs(args.data, args.train_data, args.model, args.adapter, args.train_summary, args.manifest)
+        rows, inputs = validate_inputs(args.data, args.train_data, args.model, args.adapter,
+                                      args.train_summary, args.manifest, args.split, args.validation_data)
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        parser.exit(1, "VALIDATION PREFLIGHT FAILED: " + str(exc) + "\n")
-    print("validation_preflight: PASS", json.dumps(inputs["counts"], sort_keys=True), flush=True)
+        parser.exit(1, "EVALUATION PREFLIGHT FAILED: " + str(exc) + "\n")
+    print(args.split + "_preflight: PASS", json.dumps(inputs["counts"], sort_keys=True), flush=True)
     if args.preflight_only:
         print("preflight_only: no GPU work or jobs submitted", flush=True)
         return 0

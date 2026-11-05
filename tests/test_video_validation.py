@@ -149,12 +149,15 @@ def test_invalid_answers_count_as_wrong_and_pair_accuracy_requires_both():
     assert metrics["complete_pairs"] == 2 and metrics["pair_accuracy"] == 0
 
 
-def make_outputs(tmp_path):
-    rows = rows_for("val", 100, Path("fixture.mp4"))
+def make_outputs(tmp_path, split="val"):
+    count = 100 if split == "val" else 310
+    rows = rows_for(split, count, Path("fixture.mp4"))
     base, adapter = tmp_path / "base", tmp_path / "adapter"
     base.mkdir()
     adapter.mkdir()
     common = {"inputs": {"validation_sha256": "same"}, "protocol": PROTOCOL, "runtime": {"torch": "same"}}
+    if split == "test":
+        common["inputs"].update(evaluation_split="test", expected_records=310, test_sha256="test")
     for name, directory, wrong in (("base", base, {0, 4}), ("adapter", adapter, {2, 4})):
         atomic_json(directory / "run_meta.json", dict(common, variant=name))
         for index, row in enumerate(rows):
@@ -185,6 +188,47 @@ def test_comparison_refuses_incomplete_evaluation(tmp_path):
         compare_outputs(base, adapter, tmp_path / "comparison.json")
 
 
+def test_test_comparison_requires_all_310_and_keeps_pair_metrics(tmp_path):
+    base, adapter = make_outputs(tmp_path, split="test")
+    report = compare_outputs(base, adapter, tmp_path / "comparison.json")
+    assert report["split"] == "test" and report["records"] == 310
+    assert report["base"]["status"] == "COMPLETED"
+    assert report["base"]["complete_pairs"] == 155
+    assert report["wrong_to_correct"] == report["correct_to_wrong"] == 1
+    path = adapter / "predictions.jsonl"
+    path.write_text("\n".join(path.read_text().splitlines()[:100]) + "\n")
+    with pytest.raises(ValueError, match="all 310"):
+        compare_outputs(base, adapter, tmp_path / "comparison.json")
+
+
+def add_test_fixture(project):
+    artifacts = project / "artifacts"
+    video = project / "heldout-test.mp4"
+    video.write_bytes(b"metadata fixture, not decoding")
+    rows = rows_for("test", 310, video)
+    path = artifacts / "test_records.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    manifest = artifacts / "split_manifest.json"
+    data = json.loads(manifest.read_text())
+    data["pair_ids"]["test"] = sorted({r["pair_id"] for r in rows})
+    manifest.write_text(json.dumps(data))
+    return path, rows
+
+
+def test_test_preflight_checks_manifest_and_validation_overlap(tmp_path):
+    project, _, args = fixture_project(tmp_path)
+    path, rows = add_test_fixture(project)
+    _, info = validate_inputs(path, *args[1:], split="test")
+    assert info["counts"]["test_records"] == 310
+    assert info["counts"]["test_pairs"] == 155
+    assert info["counts"]["val_test_video_overlap"] == 0
+    assert info["expected_records"] == 310 and info["evaluation_split"] == "test"
+    rows[0]["video_path"] = json.loads(args[0].read_text().splitlines()[0])["video_path"]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    with pytest.raises(ValueError, match="leakage"):
+        validate_inputs(path, *args[1:], split="test")
+
+
 def test_input_digest_detects_changed_pixels():
     spec = importlib.util.spec_from_file_location("evaluate_val", ROOT / "scripts/evaluate_videohallucer_validation.py")
     evaluate = importlib.util.module_from_spec(spec)
@@ -197,8 +241,12 @@ def test_input_digest_detects_changed_pixels():
     assert evaluate.tensor_input_digest(batch, torch) != initial
 
 
-def test_submit_preflight_and_dependencies_without_gpu(tmp_path):
+@pytest.mark.parametrize("split", ["val", "test"])
+def test_submit_preflight_and_dependencies_without_gpu(tmp_path, split):
     project, _, args = fixture_project(tmp_path)
+    eval_data = args[0]
+    if split == "test":
+        eval_data, _ = add_test_fixture(project)
     for directory in ("scripts", "pbs"):
         (project / directory).mkdir()
     for relative in ("scripts/evaluate_videohallucer_validation.py", "scripts/submit_videohallucer_validation.sh",
@@ -211,7 +259,7 @@ def test_submit_preflight_and_dependencies_without_gpu(tmp_path):
     bins.mkdir()
     for name, content in {
         "qselect": "#!/bin/bash\nexit 0\n",
-        "qsub": "#!/bin/bash\nset -eu\nn=0\nif [ -f \"$FAKE_COUNT\" ]; then read -r n < \"$FAKE_COUNT\"; fi\nn=$((n+1))\nprintf '%s\\n' \"$n\" > \"$FAKE_COUNT\"\nprintf '%s %s\\n' \"$VIDEO_TLDPO_EVAL_VARIANT\" \"$*\" >> \"$FAKE_ARGS\"\nprintf '%s.gadi-pbs\\n' \"$n\"\n",
+        "qsub": "#!/bin/bash\nset -eu\nn=0\nif [ -f \"$FAKE_COUNT\" ]; then read -r n < \"$FAKE_COUNT\"; fi\nn=$((n+1))\nprintf '%s\\n' \"$n\" > \"$FAKE_COUNT\"\nprintf '%s split=%s %s\\n' \"$VIDEO_TLDPO_EVAL_VARIANT\" \"$VIDEO_TLDPO_EVAL_SPLIT\" \"$*\" >> \"$FAKE_ARGS\"\nprintf '%s.gadi-pbs\\n' \"$n\"\n",
     }.items():
         path = bins / name
         path.write_text(content)
@@ -219,7 +267,7 @@ def test_submit_preflight_and_dependencies_without_gpu(tmp_path):
     env = dict(os.environ, VIDEO_TLDPO_PROJECT=str(project), VIDEO_TLDPO_MODEL=str(args[2]),
                VIDEO_TLDPO_ARCHIVE=str(archive), PATH=str(bins) + os.pathsep + os.environ["PATH"],
                FAKE_COUNT=str(tmp_path / "count"), FAKE_ARGS=str(tmp_path / "qsub_args"), USER="fixture")
-    command = ["bash", str(project / "scripts/submit_videohallucer_validation.sh")]
+    command = ["bash", str(project / "scripts/submit_videohallucer_validation.sh"), "--split", split]
     preflight = subprocess.run(command + ["--preflight-only"], env=env, text=True, capture_output=True)
     assert preflight.returncode == 0, preflight.stderr
     assert not (tmp_path / "count").exists()
@@ -228,7 +276,10 @@ def test_submit_preflight_and_dependencies_without_gpu(tmp_path):
     calls = (tmp_path / "qsub_args").read_text().splitlines()
     assert len(calls) == 2 and calls[0].startswith("base ") and calls[1].startswith("adapter ")
     assert "depend=afterok:1.gadi-pbs" in calls[1]
-    args[0].unlink()
+    assert all("split=" + split in call for call in calls)
+    if split == "test":
+        assert all("-N vtdpo_vh_test" in call for call in calls)
+    eval_data.unlink()
     failed = subprocess.run(command, env=env, text=True, capture_output=True)
     assert failed.returncode != 0 and "PREFLIGHT FAILED" in failed.stderr
     assert (tmp_path / "count").read_text().strip() == "2"

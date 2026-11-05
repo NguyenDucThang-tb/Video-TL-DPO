@@ -1,0 +1,53 @@
+#!/bin/bash
+#PBS -N vtdpo_vh_resume
+#PBS -P hn98
+#PBS -q gpuhopper
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=64GB
+#PBS -l walltime=01:00:00
+#PBS -l jobfs=20GB
+#PBS -l storage=gdata/hn98+scratch/jp09
+#PBS -j oe
+
+set -euo pipefail
+
+PROJECT=/g/data/hn98/dd9648/Video-TL-DPO
+GDATA=/g/data/hn98/dd9648
+ARCHIVE=/g/data/hn98/envs/dd9648_qwen25_vtdpo_v2.tar.gz
+MODEL=/g/data/hn98/dd9648/models/Qwen2.5-VL-7B-Instruct
+ENV_ROOT="$PBS_JOBFS/qwen25_train_env"
+OUT="$PROJECT/outputs/vanilla_dpo_qwen25_vh_continuous"
+
+mkdir -p "$GDATA/logs" "$OUT"
+exec > "$GDATA/logs/vanilla_dpo_resume_${PBS_JOBID}.log" 2>&1
+
+echo "job_id=$PBS_JOBID"
+if [ -f "$OUT/train_summary.json" ]; then
+    echo "training_already_complete: $OUT/train_summary.json"
+    exit 0
+fi
+hostname
+nvidia-smi
+
+mkdir -p "$ENV_ROOT"
+tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
+"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
+
+export PATH="$ENV_ROOT/bin:$PATH"
+export CONDA_PREFIX="$ENV_ROOT"
+export CONDA_DEFAULT_ENV="$ENV_ROOT"
+export PYTHONNOUSERSITE=1
+export HF_HOME="$GDATA/hf_cache"
+export XDG_CACHE_HOME="$GDATA/cache"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH="$PROJECT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+"$ENV_ROOT/bin/python" "$PROJECT/scripts/train_videohallucer_vanilla_resumable.py" \
+  --data "$PROJECT/artifacts/train_binary.jsonl" \
+  --model "$MODEL" \
+  --output "$OUT" \
+  --max-seconds 2700 \
+  --save-every 5

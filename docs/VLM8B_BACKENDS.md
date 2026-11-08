@@ -31,6 +31,8 @@ The setup PBS job creates one Conda environment, packs it into the group
 environment archive, downloads both model snapshots into the user's GData model
 directory, and records their immutable Hugging Face revisions. It intentionally
 leaves the temporary build environment in place until the JobFS smoke succeeds.
+Its Conda package cache is redirected away from the shared read-only Conda base
+and removed after the environment is packed.
 
 ```bash
 cd /g/data/hn98/$USER/Video-TL-DPO-code-download

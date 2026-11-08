@@ -22,6 +22,10 @@ if [ -e "$BUILD" ]; then
   exit 2
 fi
 
+CONDA_PKGS_DIRS="$USER_ROOT/conda_pkgs_video_vlm8b"
+mkdir -p "$CONDA_PKGS_DIRS"
+export CONDA_PKGS_DIRS
+export PIP_NO_CACHE_DIR=1
 source /g/data/hn98/mini3/etc/profile.d/conda.sh
 conda create -y -p "$BUILD" python=3.11 pip
 PYTHON="$BUILD/bin/python"
@@ -65,6 +69,7 @@ PY
 
 "$PYTHON" -m pip freeze > "$USER_ROOT/video_vlm8b_requirements.lock"
 "$BUILD/bin/conda-pack" -p "$BUILD" -o "$ARCHIVE"
+rm -rf "$CONDA_PKGS_DIRS"
 ls -lh "$ARCHIVE" "$MODELS/Qwen3-VL-8B-Instruct/config.json" \
   "$MODELS/InternVL3_5-8B-Instruct/config.json"
 echo "SETUP_ARCHIVE_AND_MODELS: PASS"

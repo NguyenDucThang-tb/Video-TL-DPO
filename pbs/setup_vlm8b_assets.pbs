@@ -2,7 +2,7 @@
 #PBS -N vtdpo_vlm8b_setup
 #PBS -P hn98
 #PBS -q copyq
-#PBS -l ncpus=8
+#PBS -l ncpus=1
 #PBS -l mem=32GB
 #PBS -l walltime=06:00:00
 #PBS -l storage=gdata/hn98

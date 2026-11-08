@@ -172,7 +172,7 @@ def _prepare_internvl(processor, frames, indices, fps, total, question, device):
     image_context = "<img>" + "<IMG_CONTEXT>" * model.num_image_token + "</img>"
     for _ in rgb_frames:
         prompt = prompt.replace("<image>", image_context, 1)
-    model.img_context_token_id = tokenizer.convert_tokens_to_ids("<IMG_CONTEXT>")
+    model.img_context_token_id = _internvl_context_token_id(tokenizer)
     pixels = torch.stack([image_transform(frame) for frame in rgb_frames]).to(torch.bfloat16)
     prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"][0].tolist()
     visual_tokens = sum(token_id == model.img_context_token_id for token_id in prompt_ids)
@@ -196,6 +196,13 @@ def _prepare_internvl(processor, frames, indices, fps, total, question, device):
     return PreparedVideo(prompt, encode, indices, fps, total)
 
 
+def _internvl_context_token_id(tokenizer) -> int:
+    token_id = tokenizer.convert_tokens_to_ids("<IMG_CONTEXT>")
+    if token_id is None or token_id == getattr(tokenizer, "unk_token_id", None):
+        raise RuntimeError("InternVL tokenizer does not recognize <IMG_CONTEXT>")
+    return int(token_id)
+
+
 def load_backend(model_dir: Path, backend: str, trainable: bool = False):
     import torch
     model_dir = Path(model_dir)
@@ -213,6 +220,9 @@ def load_backend(model_dir: Path, backend: str, trainable: bool = False):
         processor.eval()
         processor.tokenizer = AutoTokenizer.from_pretrained(
             model_dir, trust_remote_code=True, use_fast=False, local_files_only=True)
+        # Each independently loaded model (policy and frozen reference) needs
+        # this ID before forward(), which uses it to replace image token embeds.
+        processor.img_context_token_id = _internvl_context_token_id(processor.tokenizer)
         model = processor
     for candidate in (getattr(model, "config", None),
                       getattr(model, "language_model", None) and model.language_model.config,

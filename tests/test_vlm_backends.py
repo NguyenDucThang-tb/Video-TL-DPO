@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from video_tldpo.models.vlm_backends import backend_spec, language_lora_targets, model_identity
+from video_tldpo.models.vlm_backends import (
+    _internvl_context_token_id,
+    backend_spec,
+    language_lora_targets,
+    model_identity,
+)
 
 
 def test_backend_model_ids_are_the_confirmed_8b_instruct_checkpoints():
@@ -65,3 +70,26 @@ def test_lora_targets_are_exact_language_linears_only():
     names = language_lora_targets(Tiny(), "qwen3")
     assert names == ["language_model.layers.0.q_proj", "language_model.layers.0.mlp.down_proj"]
     assert all("visual" not in name for name in names)
+
+
+def test_internvl_context_token_id_is_resolved_for_each_loaded_model():
+    class Tokenizer:
+        unk_token_id = 0
+
+        @staticmethod
+        def convert_tokens_to_ids(token):
+            return {"<IMG_CONTEXT>": 92546}.get(token, 0)
+
+    assert _internvl_context_token_id(Tokenizer()) == 92546
+
+
+def test_internvl_context_token_id_rejects_unknown_token():
+    class Tokenizer:
+        unk_token_id = 0
+
+        @staticmethod
+        def convert_tokens_to_ids(token):
+            return 0
+
+    with pytest.raises(RuntimeError, match="does not recognize <IMG_CONTEXT>"):
+        _internvl_context_token_id(Tokenizer())

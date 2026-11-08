@@ -179,14 +179,15 @@ def load_eventhallusion(root, questions_dir=None, expected_video_counts=None):
     return rows, contract
 
 
-def validate_eventhallusion_inputs(root, train_data, model, adapter, train_summary, questions_dir=None):
+def validate_eventhallusion_inputs(root, train_data, model, adapter, train_summary, questions_dir=None,
+                                  backend="qwen25"):
     rows, inputs = load_eventhallusion(root, questions_dir)
     train_rows = read_jsonl(train_data)
     validate_rows(train_rows, "train", 300)
     train_videos = {str(Path(r["video_path"]).resolve()) for r in train_rows}
     if train_videos & {str(Path(r["video_path"]).resolve()) for r in rows}:
         raise ValueError("EventHallusion contains a video path used in training")
-    inputs.update(trained_adapter_contract(train_data, model, adapter, train_summary))
+    inputs.update(trained_adapter_contract(train_data, model, adapter, train_summary, backend))
     inputs["counts"]["train_video_path_overlap"] = 0
     return rows, inputs
 

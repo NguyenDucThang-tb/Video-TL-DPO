@@ -1,0 +1,70 @@
+#!/bin/bash
+#PBS -N vtdpo_vlm8b_setup
+#PBS -P hn98
+#PBS -q copyq
+#PBS -l ncpus=8
+#PBS -l mem=32GB
+#PBS -l walltime=06:00:00
+#PBS -l storage=gdata/hn98
+#PBS -j oe
+
+set -euo pipefail
+USER_ROOT="/g/data/hn98/${USER}"
+BUILD="$USER_ROOT/conda_build/video_vlm8b"
+ARCHIVE="/g/data/hn98/envs/${USER}_video_vlm8b.tar.gz"
+MODELS="$USER_ROOT/models"
+LOGDIR="$USER_ROOT/logs"
+mkdir -p "$LOGDIR" "$MODELS" "$(dirname "$BUILD")" /g/data/hn98/envs
+exec > "$LOGDIR/video_vlm8b_setup_${PBS_JOBID}.log" 2>&1
+echo "job_id=$PBS_JOBID build=$BUILD archive=$ARCHIVE models=$MODELS"
+if [ -e "$BUILD" ]; then
+  echo "ERROR: build environment path already exists; inspect it before retry: $BUILD"
+  exit 2
+fi
+
+source /g/data/hn98/mini3/etc/profile.d/conda.sh
+conda create -y -p "$BUILD" python=3.11 pip
+PYTHON="$BUILD/bin/python"
+"$PYTHON" -m pip install --upgrade pip
+"$PYTHON" -m pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+"$PYTHON" -m pip install transformers==4.57.6 peft==0.15.2 accelerate==1.10.1 \
+  decord==0.6.0 av==18.1.0 timm einops pillow safetensors huggingface_hub==0.36.0 conda-pack
+"$PYTHON" -m pip check
+"$PYTHON" - <<'PY'
+import torch, transformers, peft, decord, av, timm, einops
+from transformers import AutoProcessor, Qwen3VLForConditionalGeneration, AutoModel
+print("python_env_imports: PASS")
+print("torch", torch.__version__, "cuda_runtime", torch.version.cuda)
+print("transformers", transformers.__version__, "peft", peft.__version__)
+print("decord", decord.__version__, "av", av.__version__, "timm", timm.__version__)
+PY
+
+"$PYTHON" - "$MODELS" "$USER_ROOT" <<'PY'
+import json, sys
+from pathlib import Path
+from huggingface_hub import HfApi, snapshot_download
+
+models = Path(sys.argv[1])
+root = Path(sys.argv[2])
+specs = {
+    "qwen3": ("Qwen/Qwen3-VL-8B-Instruct", models / "Qwen3-VL-8B-Instruct"),
+    "internvl35": ("OpenGVLab/InternVL3_5-8B-Instruct", models / "InternVL3_5-8B-Instruct"),
+}
+manifest = {"models": {}}
+api = HfApi()
+for key, (repo, target) in specs.items():
+    revision = api.model_info(repo).sha
+    snapshot_download(repo_id=repo, revision=revision, local_dir=target)
+    (target / "model_revision.json").write_text(json.dumps({"repo_id": repo,
+        "revision": revision}, indent=2) + "\n")
+    manifest["models"][key] = {"repo_id": repo, "revision": revision,
+                               "local_path": str(target.resolve())}
+    print("model_download: PASS", key, revision, flush=True)
+(root / "video_vlm8b_models.json").write_text(json.dumps(manifest, indent=2) + "\n")
+PY
+
+"$PYTHON" -m pip freeze > "$USER_ROOT/video_vlm8b_requirements.lock"
+"$BUILD/bin/conda-pack" -p "$BUILD" -o "$ARCHIVE"
+ls -lh "$ARCHIVE" "$MODELS/Qwen3-VL-8B-Instruct/config.json" \
+  "$MODELS/InternVL3_5-8B-Instruct/config.json"
+echo "SETUP_ARCHIVE_AND_MODELS: PASS"

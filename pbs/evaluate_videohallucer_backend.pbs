@@ -1,0 +1,54 @@
+#!/bin/bash
+#PBS -N vtdpo_vlm8b_eval
+#PBS -P hn98
+#PBS -q gpuhopper
+#PBS -l ngpus=1
+#PBS -l ncpus=12
+#PBS -l mem=64GB
+#PBS -l walltime=01:00:00
+#PBS -l jobfs=24GB
+#PBS -l storage=gdata/hn98+scratch/jp09
+#PBS -j oe
+
+set -euo pipefail
+START=$(date +%s)
+PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/${USER}/Video-TL-DPO}
+BACKEND=${VIDEO_TLDPO_BACKEND:?Set qwen3 or internvl35}
+VARIANT=${VIDEO_TLDPO_EVAL_VARIANT:?Set base or adapter}
+DATASET=${VIDEO_TLDPO_EVAL_DATASET:-videohallucer}
+SPLIT=${VIDEO_TLDPO_EVAL_SPLIT:-test}
+case "$BACKEND" in qwen3|internvl35) ;; *) echo "Invalid backend"; exit 2 ;; esac
+case "$VARIANT" in base|adapter) ;; *) echo "Invalid variant"; exit 2 ;; esac
+case "$DATASET" in videohallucer|eventhallusion) ;; *) echo "Invalid dataset"; exit 2 ;; esac
+ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-/g/data/hn98/envs/${USER}_video_vlm8b.tar.gz}
+MODEL=${VIDEO_TLDPO_MODEL:-/g/data/hn98/${USER}/models/$([ "$BACKEND" = qwen3 ] && echo Qwen3-VL-8B-Instruct || echo InternVL3_5-8B-Instruct)}
+TRAINOUT=${VIDEO_TLDPO_TRAINOUT:-$PROJECT/outputs/vanilla_dpo_${BACKEND}_videohallucer_v1}
+ADAPTER=${VIDEO_TLDPO_ADAPTER:-$TRAINOUT/trainer_state/latest/adapter}
+SUMMARY=${VIDEO_TLDPO_TRAIN_SUMMARY:-$TRAINOUT/train_summary.json}
+EVALROOT=${VIDEO_TLDPO_EVALROOT:-$PROJECT/outputs/${DATASET}_${BACKEND}_vanilla_dpo_v1}
+ENV_ROOT="$PBS_JOBFS/video_vlm8b_env"
+LOGDIR="/g/data/hn98/${USER}/logs"
+mkdir -p "$LOGDIR"
+exec > "$LOGDIR/${DATASET}_${BACKEND}_${SPLIT}_${VARIANT}_${PBS_JOBID}.log" 2>&1
+echo "job_id=$PBS_JOBID backend=$BACKEND dataset=$DATASET split=$SPLIT variant=$VARIANT"
+test -r "$ARCHIVE" && test -r "$MODEL/config.json" || { echo "ERROR missing env archive/model"; exit 1; }
+mkdir -p "$ENV_ROOT"
+tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
+unset PYTHONHOME
+export PYTHONNOUSERSITE=1
+"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
+export PATH="$ENV_ROOT/bin:$PATH" CONDA_PREFIX="$ENV_ROOT" CONDA_DEFAULT_ENV="$ENV_ROOT"
+export HF_HOME="/g/data/hn98/${USER}/hf_cache" XDG_CACHE_HOME="/g/data/hn98/${USER}/cache"
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH="$PROJECT/src:$PROJECT/scripts${PYTHONPATH:+:$PYTHONPATH}"
+ARGS=(--backend "$BACKEND" --dataset "$DATASET" --split "$SPLIT" --variant "$VARIANT"
+      --model "$MODEL" --output "$EVALROOT" --max-seconds 2700 --deadline-epoch "$((START + 2700))")
+if [ "$DATASET" = eventhallusion ]; then
+  ARGS+=(--dataset-root "${VIDEO_TLDPO_EVENT_ROOT:-/g/data/hn98/${USER}/datasets_video_hallu/eventhallusion_full}")
+  ARGS+=(--questions-dir "${VIDEO_TLDPO_EVENT_QUESTIONS:-/scratch/jp09/${USER}/video-hallucination-benchmark/external/EventHallusion/questions}")
+else
+  ARGS+=(--data "${VIDEO_TLDPO_EVAL_DATA:-$PROJECT/artifacts/test_records.jsonl}")
+  ARGS+=(--train-data "$PROJECT/artifacts/train_binary.jsonl" --validation-data "$PROJECT/artifacts/val_binary.jsonl" --manifest "$PROJECT/artifacts/split_manifest.json")
+fi
+ARGS+=(--adapter "$ADAPTER" --train-summary "$SUMMARY")
+exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/evaluate_videohallucer_validation.py" "${ARGS[@]}"

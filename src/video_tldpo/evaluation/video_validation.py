@@ -59,8 +59,30 @@ def validate_rows(rows, split, expected):
     return pairs
 
 
-def trained_adapter_contract(train_data, model, adapter, train_summary):
+def trained_adapter_contract(train_data, model, adapter, train_summary, backend="qwen25"):
     train_data, model, adapter, train_summary = map(Path, (train_data, model, adapter, train_summary))
+    if backend in ("qwen3", "internvl35"):
+        from video_tldpo.models.vlm_backends import model_identity
+        identity = model_identity(model, backend)
+        summary = json.loads(train_summary.read_text())
+        state = json.loads((adapter.parent / "state.json").read_text())
+        if summary.get("status") != "COMPLETED" or summary.get("records") != 300 or state.get("next_record_index") != 300:
+            raise ValueError("Adapter is not the completed 300-record checkpoint")
+        if Path(summary["adapter_checkpoint"]).resolve() != adapter.resolve():
+            raise ValueError("Adapter differs from the completed training summary")
+        train_digest = file_sha256(train_data)
+        if state.get("contract", {}).get("dataset_sha256") != train_digest:
+            raise ValueError("Training JSONL differs from checkpoint provenance")
+        if summary.get("contract") != state.get("contract"):
+            raise ValueError("Summary/checkpoint contracts differ")
+        if state["contract"].get("model_identity") != identity or state["contract"].get("settings", {}).get("backend") != backend:
+            raise ValueError("Evaluation model/backend differs from the trained adapter")
+        for name in ("adapter_config.json", "adapter_model.safetensors"):
+            if not (adapter / name).is_file():
+                raise ValueError("Missing adapter file: " + name)
+        return {"backend": backend, "train_sha256": train_digest, "model_identity": identity,
+                "adapter_sha256": file_sha256(adapter / "adapter_model.safetensors"),
+                "adapter_config_sha256": file_sha256(adapter / "adapter_config.json")}
     config = json.loads((model / "config.json").read_text())
     if config.get("model_type") != "qwen2_5_vl":
         raise ValueError("Expected Qwen2.5-VL")
@@ -97,7 +119,7 @@ def trained_adapter_contract(train_data, model, adapter, train_summary):
 
 
 def validate_inputs(data, train_data, model, adapter, train_summary, manifest=None,
-                    split="val", validation_data=None):
+                    split="val", validation_data=None, backend="qwen25"):
     if split not in ("val", "test"):
         raise ValueError("Evaluation split must be val or test")
     data, train_data = map(Path, (data, train_data))
@@ -124,7 +146,7 @@ def validate_inputs(data, train_data, model, adapter, train_summary, manifest=No
         if eval_videos & val_videos or train_videos & val_videos or set(eval_pairs) & set(val_pairs) or set(train_pairs) & set(val_pairs):
             raise ValueError("Train/validation/test video or pair leakage detected")
         validation_digest = file_sha256(validation_data)
-    inputs = trained_adapter_contract(train_data, model, adapter, train_summary)
+    inputs = trained_adapter_contract(train_data, model, adapter, train_summary, backend)
     inputs.update({
         "validation_sha256": file_sha256(data), "manifest_sha256": file_sha256(manifest),
         "counts": {split + "_records": expected, split + "_pairs": len(eval_pairs), split + "_videos": len(eval_videos),

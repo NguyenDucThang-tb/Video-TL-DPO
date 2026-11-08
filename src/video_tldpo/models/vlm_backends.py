@@ -296,9 +296,17 @@ def generate(model, processor, prepared: PreparedVideo, backend: str, max_new_to
     batch = prepared.encode(prepared.prompt, device)
     generation_inputs = dict(batch)
     generation_inputs.pop("image_flags", None)
+    generation_kwargs = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": False,
+        "num_beams": 1,
+    }
+    # InternVL's custom generate() passes use_cache=True to its language model
+    # internally; forwarding it here duplicates the keyword.
+    if backend == "qwen3":
+        generation_kwargs["use_cache"] = True
     with torch.inference_mode():
-        output = model.generate(**generation_inputs, max_new_tokens=max_new_tokens,
-                                do_sample=False, num_beams=1, use_cache=True)
+        output = model.generate(**generation_inputs, **generation_kwargs)
     ids = output[0]
     input_ids = batch["input_ids"][0]
     if ids.numel() >= input_ids.numel() and torch.equal(ids[:input_ids.numel()], input_ids):

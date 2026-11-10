@@ -1,5 +1,9 @@
 mode: vanilla_dpo
 beta: 0.1
-learning_rate: 0.00001
+learning_rate: 0.0001
 epochs: 1
 grad_accum: 8
+weight_decay: 0.0
+scheduler: cosine
+warmup_fraction: 0.05
+protocol: unified_adaptive_seed_v2

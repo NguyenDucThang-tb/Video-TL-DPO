@@ -138,46 +138,16 @@ def test_duration_checks_native_timing_without_assuming_original_fps():
         validate_duration(row, {"video_grid_thw": [[4, 2, 2]], "second_per_grid_ts": [0.25]})
 
 
-def test_full_preflight_and_two_job_event_submission(tmp_path):
-    project, _, args = fixture_project(tmp_path)
-    root, _ = event_fixture(tmp_path, counts=EXPECTED_VIDEOS)
-    rows, inputs = validate_eventhallusion_inputs(root, args[1], args[2], args[3], args[4])
-    assert len(rows) == 398 and inputs["counts"]["eventhallusion_videos"] == 397
-    assert inputs["counts"]["train_video_path_overlap"] == 0
-    for directory in ("scripts", "pbs"):
-        (project / directory).mkdir()
-    for relative in ("scripts/evaluate_videohallucer_validation.py", "scripts/submit_videohallucer_validation.sh",
-                     "pbs/evaluate_videohallucer_validation.pbs"):
-        shutil.copyfile(ROOT / relative, project / relative)
-    shutil.copytree(ROOT / "src", project / "src")
-    archive = tmp_path / "env.tar.gz"
-    archive.write_bytes(b"metadata fixture; not extracting")
-    bins = tmp_path / "bin"
-    bins.mkdir()
-    fake_calls = tmp_path / "qsub_calls"
-    scripts = {
-        "qselect": "#!/bin/bash\nexit 0\n",
-        "qsub": "#!/bin/bash\nset -eu\nn=0\nif [ -f \"$FAKE_COUNT\" ]; then read -r n < \"$FAKE_COUNT\"; fi\nn=$((n+1))\nprintf '%s\\n' \"$n\" > \"$FAKE_COUNT\"\nprintf '%s dataset=%s root=%s %s\\n' \"$VIDEO_TLDPO_EVAL_VARIANT\" \"$VIDEO_TLDPO_EVAL_DATASET\" \"$VIDEO_TLDPO_EVENT_ROOT\" \"$*\" >> \"$FAKE_CALLS\"\nprintf '%s.gadi-pbs\\n' \"$n\"\n",
-    }
-    for name, body in scripts.items():
-        path = bins / name
-        path.write_text(body)
-        path.chmod(0o755)
-    env = dict(os.environ, VIDEO_TLDPO_PROJECT=str(project), VIDEO_TLDPO_MODEL=str(args[2]),
-               VIDEO_TLDPO_ARCHIVE=str(archive), PATH=str(bins) + os.pathsep + os.environ["PATH"],
-               FAKE_COUNT=str(tmp_path / "count"), FAKE_CALLS=str(fake_calls), USER="fixture")
-    command = ["bash", str(project / "scripts/submit_videohallucer_validation.sh"),
-               "--dataset", "eventhallusion", "--dataset-root", str(root)]
-    preflight = subprocess.run(command + ["--preflight-only"], env=env, capture_output=True, text=True)
-    assert preflight.returncode == 0, preflight.stderr
-    assert "eventhallusion_preflight: PASS" in preflight.stdout and not fake_calls.exists()
-    submitted = subprocess.run(command, env=env, capture_output=True, text=True)
-    assert submitted.returncode == 0, submitted.stderr
-    calls = fake_calls.read_text().splitlines()
-    assert len(calls) == 2 and calls[0].startswith("base ") and calls[1].startswith("adapter ")
-    assert all("dataset=eventhallusion" in call and "-N vtdpo_eh_eval" in call and str(root) in call for call in calls)
-    assert "depend=afterok:1.gadi-pbs" in calls[1]
-    (root / "videos/interleave/interleave_001.mp4").unlink()
-    failed = subprocess.run(command, env=env, capture_output=True, text=True)
-    assert failed.returncode != 0 and "missing 1 annotated videos" in failed.stderr
-    assert len(fake_calls.read_text().splitlines()) == 2
+def test_event_alias_forwards_root_and_questions_to_unified_job(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    alias = scripts / "submit_videohallucer_validation.sh"
+    shutil.copyfile(ROOT / "scripts/submit_videohallucer_validation.sh", alias)
+    (scripts / "submit_unified.sh").write_text(
+        '#!/bin/bash\nprintf "%s\\n" "$VIDEO_TLDPO_EVENT_ROOT" "$VIDEO_TLDPO_EVENT_QUESTIONS" "$@"\n')
+    result = subprocess.run(["bash", str(alias), "--dataset", "eventhallusion", "--base-only",
+                             "--dataset-root", "/fixture/videos", "--questions-dir", "/fixture/questions"],
+                            text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["/fixture/videos", "/fixture/questions", "base", "qwen25",
+                                          "--dataset", "eventhallusion"]

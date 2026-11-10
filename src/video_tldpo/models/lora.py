@@ -1,5 +1,6 @@
-def apply_lora(model, r=16, alpha=32, dropout=0.05):
-    from peft import LoraConfig, get_peft_model
-    cfg = LoraConfig(r=r, lora_alpha=alpha, lora_dropout=dropout, bias="none", task_type="CAUSAL_LM",
-                     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"])
-    return get_peft_model(model, cfg)
+"""Shared LoRA scope for the unified student budget."""
+def apply_lora(model, r=16, alpha=32, dropout=0.05, backend="qwen25"):
+    from video_tldpo.models.unified import attach_lora
+    if (r, alpha, dropout) != (16, 32, 0.05):
+        raise ValueError("Unified LoRA budget requires r16/alpha32/dropout0.05")
+    return attach_lora(model, backend)[0]

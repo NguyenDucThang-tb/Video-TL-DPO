@@ -8,7 +8,7 @@ MODES = {"vanilla_dpo", "target_generation_only", "target_condition_only", "full
 @dataclass
 class Config:
     data_root: str = "/scratch/jp09/dd9648/datasets_video_hallu"
-    output_root: str = "/scratch/hn98/dd9648/Video-TL-DPO/outputs"
+    output_root: str = "/g/data/hn98/dd9648/Video-TL-DPO/outputs"
     model_id: str = "Qwen/Qwen2.5-VL-7B-Instruct"
     frames: int = 8
     resolution: int = 448
@@ -16,7 +16,7 @@ class Config:
     lora_r: int = 16
     lora_alpha: int = 32
     beta: float = 0.1
-    learning_rate: float = 1e-5
+    learning_rate: float = 1e-4
     epochs: int = 1
     grad_accum: int = 8
     lambda_condition: float = 1.0

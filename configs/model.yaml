@@ -3,3 +3,6 @@ lora_r: 16
 lora_alpha: 32
 resolution: 448
 frames: 8
+lora_dropout: 0.05
+lora_scope: lm_attention_and_visual_projector
+protocol: unified_adaptive_seed_v2

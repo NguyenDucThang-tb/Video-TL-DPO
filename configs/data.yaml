@@ -1,6 +1,10 @@
 data_root: /scratch/jp09/dd9648/datasets_video_hallu
-output_root: /scratch/hn98/dd9648/Video-TL-DPO/outputs
+output_root: /g/data/hn98/dd9648/Video-TL-DPO/outputs
 frames: 8
 resolution: 448
 seed: 0
 target_verified_only: true
+canonical_split: /g/data/hn98/dd9648/OPA-DPO-Video/outputs/data/split.json
+canonical_eval: /g/data/hn98/dd9648/OPA-DPO-Video/outputs/data/eval_vh.jsonl
+canonical_train: /g/data/hn98/dd9648/OPA-DPO-Video/outputs/work_binary_all/sft.jsonl
+revision: c93475bf1be466c1af90d005749ccb4e6b3ad066

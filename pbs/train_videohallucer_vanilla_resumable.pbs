@@ -7,54 +7,11 @@
 #PBS -l mem=64GB
 #PBS -l walltime=01:00:00
 #PBS -l jobfs=20GB
-#PBS -l storage=gdata/hn98+scratch/jp09
+#PBS -l storage=gdata/hn98+scratch/hn98+scratch/jp09
 #PBS -j oe
 
 set -euo pipefail
-
-JOB_START_EPOCH=$(date +%s)
-PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/dd9648/Video-TL-DPO}
-GDATA=/g/data/hn98/dd9648
-ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-/g/data/hn98/envs/dd9648_qwen25_vtdpo_v2.tar.gz}
-MODEL=${VIDEO_TLDPO_MODEL:-/g/data/hn98/dd9648/models/Qwen2.5-VL-7B-Instruct}
-DATA=${VIDEO_TLDPO_DATA:-$PROJECT/artifacts/train_binary.jsonl}
-ENV_ROOT="$PBS_JOBFS/qwen25_train_env"
-OUT=${VIDEO_TLDPO_OUT:-$PROJECT/outputs/vanilla_dpo_qwen25_vh_continuous_v2}
-
-mkdir -p "$GDATA/logs" "$OUT"
-exec > "$GDATA/logs/vanilla_dpo_resume_${PBS_JOBID}.log" 2>&1
-
-echo "job_id=$PBS_JOBID"
-for REQUIRED in "$DATA" "$MODEL/config.json" "$ARCHIVE" \
-    "$PROJECT/scripts/train_videohallucer_vanilla_resumable.py"; do
-    if [ ! -r "$REQUIRED" ]; then
-        echo "ERROR: missing/unreadable input: $REQUIRED"
-        exit 1
-    fi
-done
-hostname
-nvidia-smi
-
-mkdir -p "$ENV_ROOT"
-tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
-"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
-
-export PATH="$ENV_ROOT/bin:$PATH"
-export CONDA_PREFIX="$ENV_ROOT"
-export CONDA_DEFAULT_ENV="$ENV_ROOT"
-export PYTHONNOUSERSITE=1
-unset PYTHONHOME
-export HF_HOME="$GDATA/hf_cache"
-export XDG_CACHE_HOME="$GDATA/cache"
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export PYTHONPATH="$PROJECT/src${PYTHONPATH:+:$PYTHONPATH}"
-
-exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/train_videohallucer_vanilla_resumable.py" \
-  --data "$DATA" \
-  --model "$MODEL" \
-  --output "$OUT" \
-  --max-seconds 2700 \
-  --deadline-epoch "$((JOB_START_EPOCH + 2700))" \
-  --save-every 5
+export VIDEO_TLDPO_COMMAND=train
+export VIDEO_TLDPO_BACKEND=qwen25
+PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/$USER/Video-TL-DPO}
+exec bash "$PROJECT/pbs/run_unified.pbs"

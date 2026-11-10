@@ -1,0 +1,46 @@
+#!/bin/bash
+#PBS -N vtdpo_unified
+#PBS -P hn98
+#PBS -q gpuhopper
+#PBS -l ngpus=1,ncpus=12,mem=64GB,jobfs=24GB,walltime=01:00:00
+#PBS -l storage=gdata/hn98+scratch/hn98+scratch/jp09
+#PBS -j oe
+
+set -euo pipefail
+START=$(date +%s)
+PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/$USER/Video-TL-DPO}
+BACKEND=${VIDEO_TLDPO_BACKEND:?Specify backend}
+COMMAND=${VIDEO_TLDPO_COMMAND:?Specify train or evaluate}
+DATASET=${VIDEO_TLDPO_EVAL_DATASET:-videohallucer}
+SPLIT=${VIDEO_TLDPO_EVAL_SPLIT:-test}
+VARIANT=${VIDEO_TLDPO_EVAL_VARIANT:-base}
+case "$BACKEND" in
+  qwen25) DEFAULT_ARCHIVE=/g/data/hn98/envs/${USER}_qwen25_vtdpo_v2.tar.gz ;;
+  qwen3|internvl35) DEFAULT_ARCHIVE=/g/data/hn98/envs/${USER}_video_vlm8b.tar.gz ;;
+  *) echo "Invalid backend" >&2; exit 2 ;;
+esac
+ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-$DEFAULT_ARCHIVE}
+LOGDIR=/g/data/hn98/$USER/logs
+mkdir -p "$LOGDIR"
+exec > "$LOGDIR/unified_${BACKEND}_${COMMAND}_${DATASET}_${SPLIT}_${VARIANT}_${PBS_JOBID}.log" 2>&1
+echo "job_id=$PBS_JOBID backend=$BACKEND command=$COMMAND dataset=$DATASET split=$SPLIT variant=$VARIANT"
+ENV_ROOT="$PBS_JOBFS/unified_env"
+mkdir -p "$ENV_ROOT"
+export TMPDIR="$PBS_JOBFS/tmp"
+mkdir -p "$TMPDIR"
+tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
+unset PYTHONHOME
+export PYTHONNOUSERSITE=1
+"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
+export PATH="$ENV_ROOT/bin:$PATH" CONDA_PREFIX="$ENV_ROOT" CONDA_DEFAULT_ENV="$ENV_ROOT"
+export HF_HOME=/g/data/hn98/$USER/hf_cache XDG_CACHE_HOME=/g/data/hn98/$USER/cache
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH="$PROJECT/src:$PROJECT/scripts"
+hostname
+nvidia-smi
+ARGS=("$COMMAND" --backend "$BACKEND" --project "$PROJECT" --dataset "$DATASET" --split "$SPLIT" --variant "$VARIANT"
+      --max-seconds 2700 --deadline-epoch "$((START + 2700))")
+if [ -n "${VIDEO_TLDPO_MODEL:-}" ]; then ARGS+=(--model "$VIDEO_TLDPO_MODEL"); fi
+if [ -n "${VIDEO_TLDPO_OUT:-}" ]; then ARGS+=(--output "$VIDEO_TLDPO_OUT"); fi
+if [ -n "${VIDEO_TLDPO_EVENT_QUESTIONS:-}" ]; then ARGS+=(--questions-dir "$VIDEO_TLDPO_EVENT_QUESTIONS"); fi
+exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/run_unified.py" "${ARGS[@]}"

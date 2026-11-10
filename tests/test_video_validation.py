@@ -242,44 +242,15 @@ def test_input_digest_detects_changed_pixels():
 
 
 @pytest.mark.parametrize("split", ["val", "test"])
-def test_submit_preflight_and_dependencies_without_gpu(tmp_path, split):
-    project, _, args = fixture_project(tmp_path)
-    eval_data = args[0]
-    if split == "test":
-        eval_data, _ = add_test_fixture(project)
-    for directory in ("scripts", "pbs"):
-        (project / directory).mkdir()
-    for relative in ("scripts/evaluate_videohallucer_validation.py", "scripts/submit_videohallucer_validation.sh",
-                     "pbs/evaluate_videohallucer_validation.pbs"):
-        shutil.copyfile(ROOT / relative, project / relative)
-    shutil.copytree(ROOT / "src", project / "src")
-    archive = tmp_path / "env.tar.gz"
-    archive.write_bytes(b"fixture; no actual extraction")
-    bins = tmp_path / "bin"
-    bins.mkdir()
-    for name, content in {
-        "qselect": "#!/bin/bash\nexit 0\n",
-        "qsub": "#!/bin/bash\nset -eu\nn=0\nif [ -f \"$FAKE_COUNT\" ]; then read -r n < \"$FAKE_COUNT\"; fi\nn=$((n+1))\nprintf '%s\\n' \"$n\" > \"$FAKE_COUNT\"\nprintf '%s split=%s %s\\n' \"$VIDEO_TLDPO_EVAL_VARIANT\" \"$VIDEO_TLDPO_EVAL_SPLIT\" \"$*\" >> \"$FAKE_ARGS\"\nprintf '%s.gadi-pbs\\n' \"$n\"\n",
-    }.items():
-        path = bins / name
-        path.write_text(content)
-        path.chmod(0o755)
-    env = dict(os.environ, VIDEO_TLDPO_PROJECT=str(project), VIDEO_TLDPO_MODEL=str(args[2]),
-               VIDEO_TLDPO_ARCHIVE=str(archive), PATH=str(bins) + os.pathsep + os.environ["PATH"],
-               FAKE_COUNT=str(tmp_path / "count"), FAKE_ARGS=str(tmp_path / "qsub_args"), USER="fixture")
-    command = ["bash", str(project / "scripts/submit_videohallucer_validation.sh"), "--split", split]
-    preflight = subprocess.run(command + ["--preflight-only"], env=env, text=True, capture_output=True)
-    assert preflight.returncode == 0, preflight.stderr
-    assert not (tmp_path / "count").exists()
-    submitted = subprocess.run(command, env=env, text=True, capture_output=True)
-    assert submitted.returncode == 0, submitted.stderr
-    calls = (tmp_path / "qsub_args").read_text().splitlines()
-    assert len(calls) == 2 and calls[0].startswith("base ") and calls[1].startswith("adapter ")
-    assert "depend=afterok:1.gadi-pbs" in calls[1]
-    assert all("split=" + split in call for call in calls)
-    if split == "test":
-        assert all("-N vtdpo_vh_test" in call for call in calls)
-    eval_data.unlink()
-    failed = subprocess.run(command, env=env, text=True, capture_output=True)
-    assert failed.returncode != 0 and "PREFLIGHT FAILED" in failed.stderr
-    assert (tmp_path / "count").read_text().strip() == "2"
+def test_validation_alias_routes_to_unified_protocol(tmp_path, split):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    alias = scripts / "submit_videohallucer_validation.sh"
+    shutil.copyfile(ROOT / "scripts/submit_videohallucer_validation.sh", alias)
+    (scripts / "submit_unified.sh").write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    result = subprocess.run(["bash", str(alias), "--base-only", "--split", split,
+                             "--dataset", "videohallucer", "--preflight-only"],
+                            text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["base", "qwen25", "--split", split,
+                                          "--dataset", "videohallucer", "--preflight-only"]

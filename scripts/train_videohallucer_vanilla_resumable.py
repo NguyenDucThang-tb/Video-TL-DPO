@@ -1,7 +1,8 @@
-"""Resumable single-run Vanilla DPO training for VideoHallucer on Gadi.
+"""Legacy artifact/scoring and atomic-checkpoint helpers.
 
-Each PBS job resumes the same policy, optimizer state, and record cursor from
-the shared checkpoint directory, then exits cleanly before its walltime.
+LEGACY_SETTINGS describes historical r8/lr1e-5 artifacts only. The command-line
+entry point routes to run_unified.py; new settings live in video_tldpo.unified.
+The atomic checkpoint helpers are also reused by the unified trainer.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import torch
 import torch.nn.functional as F
 
 SCHEMA = 2
-SETTINGS = {"frames": 8, "beta": 0.1, "learning_rate": 1e-5,
+LEGACY_SETTINGS = {"frames": 8, "beta": 0.1, "learning_rate": 1e-5,
             "seed": 0, "lora_r": 8, "lora_alpha": 16, "lora_dropout": 0.05,
             "sampled_fps_forwarded": True, "response_eos": False}
 
@@ -60,7 +61,7 @@ def restore_rng(state):
 
 def run_contract(data: Path, model: Path):
     return {
-        "schema": SCHEMA, "settings": SETTINGS,
+        "schema": SCHEMA, "settings": LEGACY_SETTINGS,
         "dataset_sha256": hashlib.sha256(data.read_bytes()).hexdigest(),
         "model_path": str(model.resolve()),
         "model_files": {name: hashlib.sha256((model / name).read_bytes()).hexdigest()
@@ -100,7 +101,7 @@ def video_sampling_spec(video_path: str):
     For clips with at least 8 frames, both routes select the same 8 indices.
     """
     return {"type": "video", "video": video_path, "fps": 2.0,
-            "min_frames": SETTINGS["frames"], "max_frames": SETTINGS["frames"]}
+            "min_frames": LEGACY_SETTINGS["frames"], "max_frames": LEGACY_SETTINGS["frames"]}
 
 
 def make_inputs(processor, row: dict):
@@ -123,9 +124,9 @@ def make_inputs(processor, row: dict):
     if not values or not all(x is not None and math.isfinite(float(x)) and float(x) > 0 for x in values):
         raise RuntimeError("Video reader returned invalid sampled FPS")
     sampled_frames = int(video_inputs[0].shape[0])
-    if not 2 <= sampled_frames <= SETTINGS["frames"] or sampled_frames % 2:
+    if not 2 <= sampled_frames <= LEGACY_SETTINGS["frames"] or sampled_frames % 2:
         raise RuntimeError(f"Invalid sampled video frame count: {sampled_frames}")
-    if sampled_frames < SETTINGS["frames"]:
+    if sampled_frames < LEGACY_SETTINGS["frames"]:
         print("short_video_sampling:", row["video_path"],
               f"sampled_frames={sampled_frames}", f"sampled_fps={fps}", flush=True)
 
@@ -189,7 +190,7 @@ def response_logp(model, processor, prompt, encode, response, with_grad):
         return response_suffix_logp(logits, batch["input_ids"], len(response_ids))
 
 
-def save_checkpoint(policy, optimizer, checkpoint_root: Path, state: dict) -> None:
+def save_checkpoint(policy, optimizer, checkpoint_root: Path, state: dict, scheduler=None) -> None:
     """Keep two checkpoint generations and allow interrupted promotion recovery."""
     checkpoint_root.mkdir(parents=True, exist_ok=True)
     temporary = checkpoint_root / "checkpoint.tmp"
@@ -200,6 +201,7 @@ def save_checkpoint(policy, optimizer, checkpoint_root: Path, state: dict) -> No
     temporary.mkdir()
     policy.save_pretrained(temporary / "adapter")
     payload = {"optimizer": optimizer.state_dict(), "state": state,
+               "scheduler": scheduler.state_dict() if scheduler is not None else None,
                "rng": capture_rng(),
                "trainable_names": [name for name, p in policy.named_parameters() if p.requires_grad]}
     with (temporary / "trainer.pt").open("wb") as handle:
@@ -258,6 +260,8 @@ def find_checkpoint(checkpoint_root: Path, contract: dict, records: int) -> Path
             for key in ("rng", "optimizer", "trainable_names"):
                 if key not in payload:
                     raise ValueError(f"Missing checkpoint field: {key}")
+            if state["contract"].get("protocol") == "unified_adaptive_seed_v2" and payload.get("scheduler") is None:
+                raise ValueError("Unified checkpoint lacks scheduler state")
             if not (path / "adapter/adapter_model.safetensors").is_file():
                 raise ValueError("Adapter weights are missing")
             return path
@@ -272,7 +276,7 @@ def write_summary(output, state, records, checkpoint=None):
     losses = state["losses"]
     temporary = output / "train_summary.json.tmp"
     temporary.write_text(json.dumps({
-        "status": "COMPLETED", "records": records, "frames": SETTINGS["frames"],
+        "status": "COMPLETED", "records": records, "frames": LEGACY_SETTINGS["frames"],
         "frame_policy": "uniform_up_to_requested_even",
         "contract": state["contract"],
         "loss_first": losses[0], "loss_last": losses[-1],
@@ -312,10 +316,10 @@ def train(args) -> None:
     from peft import LoraConfig, PeftModel, get_peft_model
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
 
-    random.seed(SETTINGS["seed"])
-    np.random.seed(SETTINGS["seed"])
-    torch.manual_seed(SETTINGS["seed"])
-    torch.cuda.manual_seed_all(SETTINGS["seed"])
+    random.seed(LEGACY_SETTINGS["seed"])
+    np.random.seed(LEGACY_SETTINGS["seed"])
+    torch.manual_seed(LEGACY_SETTINGS["seed"])
+    torch.cuda.manual_seed_all(LEGACY_SETTINGS["seed"])
 
     print("gpu:", torch.cuda.get_device_name(0), flush=True)
     print("records:", len(rows), flush=True)
@@ -337,9 +341,9 @@ def train(args) -> None:
 
     if checkpoint is None:
         lora_config = LoraConfig(
-            r=SETTINGS["lora_r"],
-            lora_alpha=SETTINGS["lora_alpha"],
-            lora_dropout=SETTINGS["lora_dropout"],
+            r=LEGACY_SETTINGS["lora_r"],
+            lora_alpha=LEGACY_SETTINGS["lora_alpha"],
+            lora_dropout=LEGACY_SETTINGS["lora_dropout"],
             bias="none",
             task_type="CAUSAL_LM",
             target_modules=[
@@ -370,7 +374,7 @@ def train(args) -> None:
         parameter.requires_grad_(False)
 
     trainable = [parameter for parameter in policy.parameters() if parameter.requires_grad]
-    optimizer = torch.optim.AdamW(trainable, lr=SETTINGS["learning_rate"])
+    optimizer = torch.optim.AdamW(trainable, lr=LEGACY_SETTINGS["learning_rate"])
     if checkpoint is not None:
         names = [name for name, p in policy.named_parameters() if p.requires_grad]
         if names != saved["trainable_names"]:
@@ -415,7 +419,7 @@ def train(args) -> None:
             policy, processor, prompt, encode, row["rejected"], True
         )
 
-        margin = SETTINGS["beta"] * (
+        margin = LEGACY_SETTINGS["beta"] * (
             (policy_chosen - ref_chosen) - (policy_rejected - ref_rejected)
         )
         loss = -F.logsigmoid(margin)
@@ -477,4 +481,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from run_unified import legacy_main
+    raise SystemExit(legacy_main("train", "qwen25"))

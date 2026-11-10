@@ -1,3 +1,5 @@
+> Superseded for new runs by [UNIFIED_PROTOCOL.md](UNIFIED_PROTOCOL.md). The default submit/PBS scripts now use forward-only margin evaluation and the unified budget. This document records the previous protocol; its old scores/checkpoints do not certify the new pipeline.
+
 # Qwen3-VL and InternVL3.5 Vanilla DPO
 
 This is a separate **Vanilla DPO LoRA baseline** using the existing fixed

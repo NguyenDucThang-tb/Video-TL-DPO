@@ -7,37 +7,10 @@
 #PBS -l mem=64GB
 #PBS -l walltime=01:00:00
 #PBS -l jobfs=24GB
-#PBS -l storage=gdata/hn98+scratch/jp09
+#PBS -l storage=gdata/hn98+scratch/hn98+scratch/jp09
 #PBS -j oe
 
 set -euo pipefail
-START=$(date +%s)
-PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/${USER}/Video-TL-DPO}
-BACKEND=${VIDEO_TLDPO_BACKEND:?Set qwen3 or internvl35}
-case "$BACKEND" in qwen3|internvl35) ;; *) echo "Invalid backend: $BACKEND"; exit 2 ;; esac
-ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-/g/data/hn98/envs/${USER}_video_vlm8b.tar.gz}
-MODEL=${VIDEO_TLDPO_MODEL:-/g/data/hn98/${USER}/models/$([ "$BACKEND" = qwen3 ] && echo Qwen3-VL-8B-Instruct || echo InternVL3_5-8B-Instruct)}
-OUT=${VIDEO_TLDPO_OUT:-$PROJECT/outputs/vanilla_dpo_${BACKEND}_videohallucer_v1}
-DATA=${VIDEO_TLDPO_DATA:-$PROJECT/artifacts/train_binary.jsonl}
-ENV_ROOT="$PBS_JOBFS/video_vlm8b_env"
-LOGDIR="/g/data/hn98/${USER}/logs"
-mkdir -p "$LOGDIR" "$OUT"
-exec > "$LOGDIR/vanilla_${BACKEND}_train_${PBS_JOBID}.log" 2>&1
-echo "job_id=$PBS_JOBID backend=$BACKEND model=$MODEL output=$OUT"
-for file in "$ARCHIVE" "$MODEL/config.json" "$DATA" "$PROJECT/scripts/train_videohallucer_backend.py"; do
-  test -r "$file" || { echo "ERROR missing input: $file"; exit 1; }
-done
-hostname
-nvidia-smi
-mkdir -p "$ENV_ROOT"
-tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
-unset PYTHONHOME
-export PYTHONNOUSERSITE=1
-"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
-export PATH="$ENV_ROOT/bin:$PATH" CONDA_PREFIX="$ENV_ROOT" CONDA_DEFAULT_ENV="$ENV_ROOT"
-export HF_HOME="/g/data/hn98/${USER}/hf_cache" XDG_CACHE_HOME="/g/data/hn98/${USER}/cache"
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export PYTHONPATH="$PROJECT/src:$PROJECT/scripts${PYTHONPATH:+:$PYTHONPATH}"
-exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/train_videohallucer_backend.py" \
-  --backend "$BACKEND" --data "$DATA" --model "$MODEL" --output "$OUT" \
-  --max-seconds 2700 --deadline-epoch "$((START + 2700))" --save-every 5
+export VIDEO_TLDPO_COMMAND=train
+PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/$USER/Video-TL-DPO}
+exec bash "$PROJECT/pbs/run_unified.pbs"

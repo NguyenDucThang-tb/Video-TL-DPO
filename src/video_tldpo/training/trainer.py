@@ -2,7 +2,7 @@
 import math, torch
 
 class PreferenceTrainer:
-    def __init__(self, policy, reference, optimizer, scheduler=None, grad_accum=1, clip=1.0):
+    def __init__(self, policy, reference, optimizer, scheduler=None, grad_accum=8, clip=1.0):
         self.policy, self.reference, self.optimizer, self.scheduler = policy, reference, optimizer, scheduler
         self.grad_accum, self.clip = grad_accum, clip
 

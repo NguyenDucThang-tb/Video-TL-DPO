@@ -258,4 +258,5 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from run_unified import legacy_main
+    sys.exit(legacy_main("evaluate", "qwen25"))

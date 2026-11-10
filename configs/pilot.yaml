@@ -1,8 +1,12 @@
 mode: vanilla_dpo
 frames: 8
-resolution: 224
+resolution: 448
 lora_r: 16
 lora_alpha: 32
 epochs: 1
-learning_rate: 0.00001
-grad_accum: 1
+learning_rate: 0.0001
+grad_accum: 8
+weight_decay: 0.0
+scheduler: cosine
+warmup_fraction: 0.05
+protocol: unified_adaptive_seed_v2

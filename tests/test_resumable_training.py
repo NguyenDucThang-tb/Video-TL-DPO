@@ -197,78 +197,22 @@ def test_old_fixed_frame_request_reproduces_reported_error():
         vision.smart_nframes({"nframes": 8}, total_frames=6, video_fps=30.0)
 
 
-def submit_fixture(tmp_path):
-    project = tmp_path / "project"
-    (project / "scripts").mkdir(parents=True)
-    (project / "pbs").mkdir()
-    (project / "artifacts").mkdir()
-    for relative in ("scripts/train_videohallucer_vanilla_resumable.py", "pbs/train_videohallucer_vanilla_resumable.pbs"):
-        (project / relative).write_bytes((ROOT / relative).read_bytes())
-    video = tmp_path / "fixture.mp4"
-    video.write_bytes(b"not-a-decoding-test")
-    data = project / "artifacts/train_binary.jsonl"
-    data.write_text("\n".join(json.dumps({
-        "sample_id": str(i), "split": "train", "question": "q", "video_path": str(video),
-        "chosen": "Yes.", "rejected": "No.", "gt_answer": "yes",
-    }) for i in range(300)) + "\n")
-    model = tmp_path / "model"
-    model.mkdir()
-    (model / "config.json").write_text(json.dumps({"model_type": "qwen2_5_vl"}))
-    (model / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {"w": "weights.safetensors"}}))
-    for name in ("weights.safetensors", "preprocessor_config.json", "tokenizer.json", "tokenizer_config.json"):
-        (model / name).write_text("fixture")
-    archive = tmp_path / "env.tar.gz"
-    archive.write_bytes(b"not-an-extraction-test")
-    env = dict(os.environ, VIDEO_TLDPO_PROJECT=str(project), VIDEO_TLDPO_MODEL=str(model),
-               VIDEO_TLDPO_ARCHIVE=str(archive), VIDEO_TLDPO_DATA=str(data), USER="fixture")
-    return project, data, env
-
-
-def test_submission_preflight_stops_missing_data_before_qsub(tmp_path):
-    project, data, env = submit_fixture(tmp_path)
-    data.unlink()
-    result = subprocess.run(["bash", str(ROOT / "scripts/submit_videohallucer_vanilla_chain.sh")],
-                            env=env, text=True, capture_output=True)
-    assert result.returncode != 0
-    assert "PREFLIGHT FAILED" in result.stderr
-    assert not (project / "logs").exists()
-
-
-def test_submission_refuses_an_existing_chain(tmp_path):
-    project, _, env = submit_fixture(tmp_path)
-    bins = tmp_path / "bin"
-    bins.mkdir()
-    qsub = bins / "qsub"
-    qsub.write_text("#!/bin/bash\nexit 99\n")
-    qsub.chmod(0o755)
-    qselect = bins / "qselect"
-    qselect.write_text("#!/bin/bash\nprintf '123.gadi-pbs\\n'\n")
-    qselect.chmod(0o755)
-    env["PATH"] = str(bins) + os.pathsep + env["PATH"]
-    result = subprocess.run(["bash", str(ROOT / "scripts/submit_videohallucer_vanilla_chain.sh")],
-                            env=env, text=True, capture_output=True)
-    assert result.returncode != 0 and "refusing a duplicate chain" in result.stderr
-    assert not (project / "logs").exists()
-
-
-def test_submission_chains_real_script_arguments_without_arrays(tmp_path):
-    project, _, env = submit_fixture(tmp_path)
-    bins = tmp_path / "bin"
-    bins.mkdir()
-    qsub = bins / "qsub"
-    qsub.write_text("#!/bin/bash\nset -eu\nn=0\nif [ -f \"$FAKE_COUNTER\" ]; then read -r n < \"$FAKE_COUNTER\"; fi\nn=$((n+1))\nprintf '%s\\n' \"$n\" > \"$FAKE_COUNTER\"\nprintf '%s\\n' \"$*\" >> \"$FAKE_ARGS\"\nprintf '%s.gadi-pbs\\n' \"$n\"\n")
-    qsub.chmod(0o755)
-    qselect = bins / "qselect"
-    qselect.write_text("#!/bin/bash\nexit 0\n")
-    qselect.chmod(0o755)
-    env.update(PATH=str(bins) + os.pathsep + env["PATH"],
-               FAKE_COUNTER=str(tmp_path / "counter"), FAKE_ARGS=str(tmp_path / "args"))
-    result = subprocess.run(["bash", str(ROOT / "scripts/submit_videohallucer_vanilla_chain.sh"), "--jobs", "3"],
-                            env=env, text=True, capture_output=True)
+def test_legacy_chain_alias_forwards_jobs_and_preflight(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    alias = scripts / "submit_videohallucer_vanilla_chain.sh"
+    alias.write_bytes((ROOT / "scripts/submit_videohallucer_vanilla_chain.sh").read_bytes())
+    (scripts / "submit_unified.sh").write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    result = subprocess.run(["bash", str(alias), "--jobs", "3", "--preflight-only"],
+                            text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "args").read_text().splitlines()
-    assert len(args) == 3 and all("-J" not in line for line in args)
-    assert "depend=" not in args[0]
-    assert "depend=afterok:1.gadi-pbs" in args[1]
-    assert "depend=afterok:2.gadi-pbs" in args[2]
-    assert all(str(project / "pbs/train_videohallucer_vanilla_resumable.pbs") in line for line in args)
+    assert result.stdout.splitlines() == ["train", "qwen25", "--jobs", "3", "--preflight-only"]
+
+
+def test_default_pbs_uses_packaged_env_and_unified_entrypoint():
+    script = (ROOT / "pbs/run_unified.pbs").read_text()
+    assert "walltime=01:00:00" in script
+    assert "storage=gdata/hn98+scratch/hn98+scratch/jp09" in script
+    assert '"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"' in script
+    assert '"$PROJECT/scripts/run_unified.py"' in script
+    assert "bin/activate" not in script

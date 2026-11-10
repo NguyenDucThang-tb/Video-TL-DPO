@@ -52,12 +52,16 @@ def main(argv=None):
     if a.max_seconds <= 120 or a.save_every < 1:
         p.error("max-seconds must exceed 120; save-every must be positive")
     try:
+        needs_train_source = a.command == "train" or (a.command == "evaluate" and a.variant == "adapter")
         splits, data = load_vh(a.artifacts, a.canonical_split, a.canonical_eval,
-                               canonical_train=a.canonical_train)
+                               canonical_train=a.canonical_train if needs_train_source else None)
+        canonical_train_sha256 = data.pop("canonical_train", None)
         contract = {"protocol": PROTOCOL_ID, "settings": SETTINGS, "backend": a.backend,
                     "model_identity": identity(a.model, a.backend), "vh_data": data,
                     "reference_sha256": file_sha256(a.reference_margins),
                     "source_sha256": source_fingerprint()}
+        if canonical_train_sha256 is not None:
+            contract["canonical_train_sha256"] = canonical_train_sha256
         if a.command == "train":
             from video_tldpo.training.unified import require_base_checks
             require_base_checks(a.project, a.backend, contract)
@@ -80,7 +84,7 @@ def main(argv=None):
                 saved_contract = summary.get("contract", {})
                 if summary.get("status") != "COMPLETED" or summary.get("records") != 300 or summary.get("optimizer_steps") != 38:
                     raise ValueError("Adapter requires completed unified 300-record/38-step training")
-                for key in ("protocol", "settings", "model_identity", "vh_data", "backend", "source_sha256", "reference_sha256"):
+                for key in ("protocol", "settings", "model_identity", "vh_data", "backend", "source_sha256", "reference_sha256", "canonical_train_sha256"):
                     if saved_contract.get(key) != contract[key]:
                         raise ValueError("Adapter training differs from unified configuration: " + key)
                 if Path(summary["adapter_checkpoint"]).resolve() != a.adapter.resolve():

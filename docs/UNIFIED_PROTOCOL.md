@@ -11,11 +11,13 @@ does not claim the target-generation/target-condition method has been trained.
 
 ## Data and inference
 
-Preflight reads the authoritative OPA `outputs/data/split.json`,
-`outputs/data/eval_vh.jsonl`, and `outputs/work_binary_all/sft.jsonl`. It uses
-the canonical SFT rows as the actual training source, binding every row to the
-fixed train pair IDs and checking question, answer and video against the
-prepared training artifact. It validates actual train/val/test pair membership,
+Preflight reads the authoritative OPA `outputs/data/split.json` and
+`outputs/data/eval_vh.jsonl`. Base evaluation only needs those split/eval files.
+Training and adapter evaluation additionally require
+`outputs/work_binary_all/sft.jsonl`; training uses those canonical SFT rows as
+the actual source, binding every row to fixed train pair IDs and checking
+question, answer and video against the prepared training artifact. It validates
+actual train/val/test pair membership,
 each val/test question, label and video reference, requires 300/100/310 records
 and both subsets, and checks video separation. No new split is generated.
 Accepted split schemas are `pair_ids`,

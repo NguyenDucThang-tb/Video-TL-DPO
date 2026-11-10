@@ -11,13 +11,13 @@ does not claim the target-generation/target-condition method has been trained.
 
 ## Data and inference
 
-Preflight reads the authoritative OPA `outputs/data/split.json` and
-`outputs/data/eval_vh.jsonl`. Base evaluation only needs those split/eval files.
-Training and adapter evaluation additionally require
-`outputs/work_binary_all/sft.jsonl`; training uses those canonical SFT rows as
-the actual source, binding every row to fixed train pair IDs and checking
-question, answer and video against the prepared training artifact. It validates
-actual train/val/test pair membership,
+Preflight reads OPA `outputs/data/split.json` and `outputs/data/eval_vh.jsonl`
+only as the shared sample split and validation/test manifest. Video-TL-DPO is a
+separate experiment: its actual train source is its own
+`artifacts/train_binary.jsonl`, not OPA's experiment-specific SFT output. The
+loader binds every local train row to the fixed train pair IDs and checks its
+question, answer and video against the same prepared Video-TL-DPO artifact. It
+validates actual train/val/test pair membership,
 each val/test question, label and video reference, requires 300/100/310 records
 and both subsets, and checks video separation. No new split is generated.
 Accepted split schemas are `pair_ids`,

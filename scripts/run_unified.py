@@ -25,7 +25,7 @@ def main(argv=None):
     p.add_argument("--artifacts", type=Path)
     p.add_argument("--canonical-split", type=Path, default=Path(os.environ.get("VIDEO_TLDPO_CANONICAL_SPLIT", str(canonical / "data/split.json"))))
     p.add_argument("--canonical-eval", type=Path, default=Path(os.environ.get("VIDEO_TLDPO_CANONICAL_EVAL", str(canonical / "data/eval_vh.jsonl"))))
-    p.add_argument("--canonical-train", type=Path, default=Path(os.environ.get("VIDEO_TLDPO_CANONICAL_TRAIN", str(canonical / "work_binary_all/sft.jsonl"))))
+    p.add_argument("--canonical-train", type=Path)
     p.add_argument("--dataset", choices=("videohallucer", "eventhallusion"), default="videohallucer")
     p.add_argument("--split", choices=("val", "test"), default="test")
     p.add_argument("--variant", choices=("base", "adapter"), default="base")
@@ -42,6 +42,8 @@ def main(argv=None):
     a = p.parse_args(argv)
     a.model = a.model or home / "models" / MODEL_NAMES[a.backend]
     a.artifacts = a.artifacts or a.project / "artifacts"
+    a.canonical_train = a.canonical_train or Path(os.environ.get(
+        "VIDEO_TLDPO_CANONICAL_TRAIN", str(a.artifacts / "train_binary.jsonl")))
     root = a.project / "outputs" / PROTOCOL_ID / a.backend
     trainout = root / "train"
     a.output = a.output or (trainout if a.command == "train" else root / (a.dataset + "_" + a.split))

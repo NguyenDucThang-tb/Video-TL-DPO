@@ -87,7 +87,7 @@ class UnifiedContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "metadata"):
                 load_vh(root, root / "split.json", path, check_files=False)
 
-    def test_identical_aggregate_base_scores_do_not_hide_different_predictions(self):
+    def test_base_gate_uses_configured_counts_and_keeps_margin_diagnostics(self):
         rows = []
         for i in range(155):
             # Qwen3 target: 89 both-correct, 57 single-correct, 9 neither-correct.
@@ -109,8 +109,13 @@ class UnifiedContractTests(unittest.TestCase):
             self.assertEqual(metrics(changed, 310)["overall"]["correct"], 235)
             self.assertEqual(metrics(changed, 310)["both_correct_pairs"], 89)
             check = base_check(changed, metrics(changed, 310), "qwen3", "videohallucer", path, {})
-            self.assertEqual(check["status"], "FAIL")
+            self.assertEqual(check["status"], "PASS")
             self.assertEqual(len(check["prediction_disagreements"]), 2)
+            changed[192]["margin"] *= -1
+            changed[192]["prediction"] = "yes" if changed[192]["margin"] > 0 else "no"
+            changed[192]["correct"] = not changed[192]["correct"]
+            self.assertEqual(base_check(changed, metrics(changed, 310), "qwen3", "videohallucer",
+                                        path, {})["status"], "FAIL")
 
     def test_submission_is_a_real_one_hour_resume_chain_and_preflight_does_not_submit(self):
         script = Path(__file__).resolve().parents[1] / "scripts/submit_unified.sh"

@@ -48,7 +48,9 @@ def main(argv=None):
     a.adapter = a.adapter or trainout / "trainer_state/latest/adapter"
     a.train_summary = a.train_summary or trainout / "train_summary.json"
     refname = {"qwen25": "base", "qwen3": "base_qwen3", "internvl35": "base_internvl"}[a.backend]
-    a.reference_margins = a.reference_margins or canonical / "eval" / refname / "margins.jsonl"
+    if a.reference_margins is None:
+        candidate = canonical / "eval" / refname / "margins.jsonl"
+        a.reference_margins = candidate if candidate.is_file() else None
     if a.max_seconds <= 120 or a.save_every < 1:
         p.error("max-seconds must exceed 120; save-every must be positive")
     try:
@@ -58,7 +60,7 @@ def main(argv=None):
         canonical_train_sha256 = data.pop("canonical_train", None)
         contract = {"protocol": PROTOCOL_ID, "settings": SETTINGS, "backend": a.backend,
                     "model_identity": identity(a.model, a.backend), "vh_data": data,
-                    "reference_sha256": file_sha256(a.reference_margins),
+                    "reference_sha256": file_sha256(a.reference_margins) if a.reference_margins is not None else None,
                     "source_sha256": source_fingerprint()}
         if canonical_train_sha256 is not None:
             contract["canonical_train_sha256"] = canonical_train_sha256
@@ -76,7 +78,7 @@ def main(argv=None):
                 contract["event_data"] = event
             else:
                 rows = splits[a.split]
-            if a.split == "test":
+            if a.split == "test" and a.reference_margins is not None:
                 from video_tldpo.evaluation.unified import reference_rows
                 reference_rows(a.reference_margins, rows)
             if a.variant == "adapter":

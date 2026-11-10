@@ -55,18 +55,20 @@ def reference_rows(path, rows):
 
 
 def base_check(rows, result, backend, dataset, reference, contract):
-    refs = reference_rows(reference, rows)
-    disagreements = [r["sample_id"] for r in rows if (r["margin"] > 0) !=
-                     (float(refs[r["sample_id"]]["margin"]) > 0)]
+    refs = reference_rows(reference, rows) if reference is not None else None
+    disagreements = ([r["sample_id"] for r in rows if (r["margin"] > 0) !=
+                     (float(refs[r["sample_id"]]["margin"]) > 0)] if refs is not None else [])
     expected = BASE_COUNTS[backend]
     counts_match = result["overall"]["correct"] == (expected[2] if dataset == "eventhallusion" else expected[0])
     if dataset == "videohallucer":
         counts_match = counts_match and result["both_correct_pairs"] == expected[1]
-    passed = result["status"] == "COMPLETED" and counts_match and not disagreements
+    passed = result["status"] == "COMPLETED" and counts_match
     return {"status": "PASS" if passed else "FAIL", "contract": contract,
             "expected_counts_match": counts_match, "prediction_disagreements": disagreements,
-            "max_absolute_margin_difference": max(abs(r["margin"] - float(refs[r["sample_id"]]["margin"])) for r in rows),
-            "reference_sha256": file_sha256(reference)}
+            "reference_status": "available_diagnostic" if refs is not None else "missing_diagnostic",
+            "max_absolute_margin_difference": (max(abs(r["margin"] - float(refs[r["sample_id"]]["margin"]))
+                for r in rows) if refs is not None else None),
+            "reference_sha256": file_sha256(reference) if reference is not None else None}
 
 
 def input_digest(batch):

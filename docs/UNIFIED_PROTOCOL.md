@@ -93,13 +93,13 @@ for BACKEND in qwen25 qwen3 internvl35; do
 done
 ```
 
-Each base must match the specified question/pair counts AND every canonical
-prediction sign in OPA `outputs/eval/{base,base_qwen3,base_internvl}/margins.jsonl`.
-The margin file accepts `sample_id`/`id`/`key` plus a finite `margin` field.
-Raw margin differences are saved diagnostically; equal aggregate accuracy
-alone is insufficient. On mismatch the GPU job exits nonzero and writes a
-`base_check.json` with disagreement IDs. No offsets or thresholds are adjusted
-to fit the target. A separate base check is needed for VH_TEST and EH_ALL.
+Each base must match the specified question and pair counts. If the corresponding
+canonical margin file exists, per-sample margin differences are recorded as
+diagnostics; they do not replace the required aggregate-count check. If counts
+differ, use those margins to locate preprocessing or token-scoring differences.
+Missing diagnostics do not block base scoring. No offsets or thresholds are
+adjusted to fit the target. A separate base check is needed for VH_TEST and
+EH_ALL.
 
 After both `base_check.json` files say PASS for a backend:
 

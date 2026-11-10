@@ -6,26 +6,7 @@ import signal
 import time
 
 from video_tldpo.evaluation.video_validation import atomic_json
-from video_tldpo.unified import PROTOCOL_ID, SETTINGS, optimizer_budget
-
-
-def require_base_checks(project, backend, contract):
-    """Training starts only after both untrained-model base checks pass."""
-    checks = {}
-    for dataset in ("videohallucer", "eventhallusion"):
-        path = project / "outputs" / PROTOCOL_ID / backend / (dataset + "_test") / "base/base_check.json"
-        if not path.is_file():
-            raise ValueError("Run unified base evaluation first; missing " + str(path))
-        check = json.loads(path.read_text())
-        if check.get("status") != "PASS":
-            raise ValueError("Canonical base validation has not passed: " + str(path))
-        for key in ("protocol", "settings", "model_identity", "vh_data", "backend", "reference_sha256", "source_sha256"):
-            if check["contract"].get(key) != contract.get(key):
-                raise ValueError("Base validation is stale/different: " + key)
-        if "runtime" in contract and check["contract"].get("runtime") != contract["runtime"]:
-            raise ValueError("Runtime versions differ from verified base environment")
-        checks[dataset] = check
-    return checks
+from video_tldpo.unified import SETTINGS, optimizer_budget
 
 
 def train(args, rows, contract):
@@ -36,7 +17,6 @@ def train(args, rows, contract):
     from transformers import get_cosine_schedule_with_warmup
     import train_videohallucer_vanilla_resumable as checkpoints
     from video_tldpo.models.unified import answer_ids, answer_scores, attach_lora, load, prepare
-    require_base_checks(args.project, args.backend, contract)
     stopped = []
     signal.signal(signal.SIGTERM, lambda *_: stopped.append(True))
     deadline = min(time.time() + args.max_seconds, args.deadline_epoch or float("inf"))

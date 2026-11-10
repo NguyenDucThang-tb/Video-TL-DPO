@@ -65,8 +65,6 @@ def main(argv=None):
         if canonical_train_sha256 is not None:
             contract["canonical_train_sha256"] = canonical_train_sha256
         if a.command == "train":
-            from video_tldpo.training.unified import require_base_checks
-            require_base_checks(a.project, a.backend, contract)
             rows = splits["train"]
         else:
             contract.update(dataset=a.dataset, split=a.split, variant=a.variant)

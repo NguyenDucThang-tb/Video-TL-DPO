@@ -11,7 +11,7 @@ The executable settings live in `src/video_tldpo/unified.py`.
 cd /g/data/hn98/$USER/Video-TL-DPO
 bash scripts/submit_unified.sh base qwen3 --preflight-only
 bash scripts/submit_unified.sh base qwen3
-# After BOTH canonical base checks pass:
+# Training can run before base evaluation; run base checks before reporting comparisons.
 bash scripts/submit_unified.sh train qwen3 --jobs 2
 # After the unified 300-record / 38-step training completes:
 bash scripts/submit_unified.sh eval qwen3

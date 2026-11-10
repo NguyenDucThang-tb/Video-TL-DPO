@@ -62,6 +62,7 @@ class UnifiedContractTests(unittest.TestCase):
             (root / name).write_text("".join(json.dumps(r) + "\n" for r in rows))
         (root / "split.json").write_text(json.dumps(ids))
         (root / "eval_vh.jsonl").write_text("".join(json.dumps(r) + "\n" for r in splits["val"] + splits["test"]))
+            (root / "sft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in splits["train"]))
         return ids, splits
 
     def test_canonical_membership_not_just_containment_in_all_predictions(self):
@@ -164,14 +165,15 @@ class UnifiedContractTests(unittest.TestCase):
             ref.write_text("".join(json.dumps(dict(r, margin=1)) + "\n" for r in splits["test"]))
             args = [sys.executable, str(script), "evaluate", "--backend", "qwen25", "--model", str(model),
                     "--project", str(root), "--artifacts", str(root), "--canonical-split", str(root / "split.json"),
-                    "--canonical-eval", str(root / "eval_vh.jsonl"), "--reference-margins", str(ref), "--preflight-only"]
+                    "--canonical-eval", str(root / "eval_vh.jsonl"), "--canonical-train", str(root / "sft.jsonl"),
+                    "--reference-margins", str(ref), "--preflight-only"]
             result = subprocess.run(args, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("UNIFIED_PREFLIGHT: PASS", result.stdout)
             args[2] = "train"
             result = subprocess.run(args, capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Run unified base evaluation first", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("UNIFIED_PREFLIGHT: PASS", result.stdout)
             self.assertFalse((root / "outputs").exists())
 
     def test_eval_resume_discards_uncommitted_final_record_and_rejects_changed_inputs(self):

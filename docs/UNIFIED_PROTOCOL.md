@@ -101,7 +101,9 @@ Missing diagnostics do not block base scoring. No offsets or thresholds are
 adjusted to fit the target. A separate base check is needed for VH_TEST and
 EH_ALL.
 
-After both `base_check.json` files say PASS for a backend:
+Training may be submitted after its data/model preflight passes; base evaluation
+does not gate optimizer training. Run the base jobs before reporting comparisons
+so the published baseline and adapter use the validated shared protocol.
 
 ```bash
 bash scripts/submit_unified.sh train qwen3 --preflight-only

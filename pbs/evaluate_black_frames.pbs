@@ -1,0 +1,44 @@
+#!/bin/bash
+#PBS -N vtdpo_black
+#PBS -P hn98
+#PBS -q gpuhopper
+#PBS -l ngpus=1,ncpus=12,mem=64GB,jobfs=24GB,walltime=00:30:00
+#PBS -l storage=gdata/hn98+scratch/hn98
+#PBS -j oe
+
+set -euo pipefail
+PROJECT=/g/data/hn98/$USER/Video-TL-DPO
+USER_ROOT=/g/data/hn98/$USER
+BACKEND=${VIDEO_TLDPO_BACKEND:?set backend}
+RUN_ROOT=$PROJECT/outputs/unified_adaptive_seed_v3_language_attention_v1
+case "$BACKEND" in
+  qwen3) MODEL=$USER_ROOT/models/Qwen3-VL-8B-Instruct ;;
+  internvl35) MODEL=$USER_ROOT/models/InternVL3_5-8B-Instruct ;;
+  *) echo "invalid backend: $BACKEND" >&2; exit 2 ;;
+esac
+ARCHIVE=/g/data/hn98/envs/${USER}_video_vlm8b.tar.gz
+OUTPUT=$RUN_ROOT/$BACKEND/videohallucer_test/adapter_black_frames
+LOGDIR=$USER_ROOT/logs
+mkdir -p "$LOGDIR"
+exec > "$LOGDIR/black_frames_${BACKEND}_${PBS_JOBID}.log" 2>&1
+
+echo "backend=$BACKEND output=$OUTPUT"
+ENV_ROOT=$PBS_JOBFS/video_vlm8b_env
+mkdir -p "$ENV_ROOT" "$PBS_JOBFS/tmp"
+export TMPDIR=$PBS_JOBFS/tmp
+tar -xzf "$ARCHIVE" -C "$ENV_ROOT"
+unset PYTHONHOME
+export PYTHONNOUSERSITE=1
+"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"
+export PATH="$ENV_ROOT/bin:$PATH" CONDA_PREFIX="$ENV_ROOT" CONDA_DEFAULT_ENV="$ENV_ROOT"
+export HF_HOME=$USER_ROOT/hf_cache XDG_CACHE_HOME=$USER_ROOT/cache
+export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTHONPATH="$PROJECT/src:$PROJECT/scripts"
+hostname
+nvidia-smi
+exec "$ENV_ROOT/bin/python" "$PROJECT/scripts/evaluate_black_frames.py" \
+  --backend "$BACKEND" --project "$PROJECT" --run-root "$RUN_ROOT" \
+  --model "$MODEL" \
+  --canonical-split "$USER_ROOT/OPA-DPO-Video/outputs/data/split.json" \
+  --canonical-eval "$USER_ROOT/OPA-DPO-Video/outputs/data/eval_vh.jsonl" \
+  --output "$OUTPUT"

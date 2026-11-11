@@ -92,10 +92,13 @@ def decode(path):
     return frames, 8 / duration, indices
 
 
-def prepare(processor, model, row, backend):
+def prepare(processor, model, row, backend, black_frames=False):
     import torch
     import numpy as np
     frames, fps, indices = decode(row["video_path"])
+    if black_frames:
+        from PIL import Image
+        frames = [Image.new("RGB", (448, 448), color=(0, 0, 0)) for _ in frames]
     question = row["question"].strip() + PROMPT_SUFFIX
     if backend in ("qwen25", "qwen3"):
         messages = [{"role": "user", "content": [{"type": "video"}, {"type": "text", "text": question}]}]

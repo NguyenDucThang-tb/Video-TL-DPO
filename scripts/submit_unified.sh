@@ -14,9 +14,14 @@ while [ "$#" -gt 0 ]; do
     --split) SPLIT=${2:?}; shift 2 ;;
     --preflight-only) PREFLIGHT=1; shift ;;
     --walltime) WALLTIME=${2:?}; shift 2 ;;
+    --lora-scope) export VIDEO_TLDPO_LORA_SCOPE=${2:?}; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+case "${VIDEO_TLDPO_LORA_SCOPE:-attention_projector}" in
+  attention_projector|language_attention) ;;
+  *) echo "Invalid LoRA scope" >&2; exit 2 ;;
+esac
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] && [ "$JOBS" -le 32 ] || { echo "jobs must be 1..32" >&2; exit 2; }
 if [ "$MODE" != train ] && [ "$JOBS" != 1 ]; then
   echo "--jobs chains apply to training; partial eval must be explicitly resubmitted" >&2; exit 2
@@ -46,15 +51,17 @@ if [ "$PREFLIGHT" = 1 ]; then echo "preflight_only: no jobs submitted"; exit 0; 
 case "$BACKEND" in qwen25) DEFAULT_ARCHIVE=/g/data/hn98/envs/${USER}_qwen25_vtdpo_v2.tar.gz ;; *) DEFAULT_ARCHIVE=/g/data/hn98/envs/${USER}_video_vlm8b.tar.gz ;; esac
 export VIDEO_TLDPO_ARCHIVE=${VIDEO_TLDPO_ARCHIVE:-$DEFAULT_ARCHIVE}
 test -r "$VIDEO_TLDPO_ARCHIVE" || { echo "Missing env archive" >&2; exit 1; }
+JOB_PREFIX=vtdpo3
+if [ "${VIDEO_TLDPO_LORA_SCOPE:-attention_projector}" = language_attention ]; then JOB_PREFIX=vtdpo3_la; fi
 for DATA in "${DATASETS[@]}"; do
-  ACTIVE=$(qselect -u "$USER" -N "vtdpo3_${BACKEND}_${MODE}_${DATA}_${SPLIT}")
+  ACTIVE=$(qselect -u "$USER" -N "${JOB_PREFIX}_${BACKEND}_${MODE}_${DATA}_${SPLIT}")
   if [ -n "$ACTIVE" ]; then
     echo "Existing jobs for $BACKEND/$MODE/$DATA; refusing duplicates: $ACTIVE" >&2
     exit 1
   fi
 done
 EXPORTS=VIDEO_TLDPO_PROJECT,VIDEO_TLDPO_BACKEND,VIDEO_TLDPO_COMMAND,VIDEO_TLDPO_EVAL_VARIANT,VIDEO_TLDPO_EVAL_DATASET,VIDEO_TLDPO_EVAL_SPLIT,VIDEO_TLDPO_ARCHIVE,VIDEO_TLDPO_JOB_SECONDS
-for NAME in VIDEO_TLDPO_MODEL VIDEO_TLDPO_CANONICAL_SPLIT VIDEO_TLDPO_CANONICAL_EVAL VIDEO_TLDPO_CANONICAL_TRAIN VIDEO_TLDPO_EVENT_ROOT VIDEO_TLDPO_EVENT_QUESTIONS VIDEO_TLDPO_OUT VIDEO_TLDPO_RUN_ROOT; do
+for NAME in VIDEO_TLDPO_MODEL VIDEO_TLDPO_CANONICAL_SPLIT VIDEO_TLDPO_CANONICAL_EVAL VIDEO_TLDPO_CANONICAL_TRAIN VIDEO_TLDPO_EVENT_ROOT VIDEO_TLDPO_EVENT_QUESTIONS VIDEO_TLDPO_OUT VIDEO_TLDPO_RUN_ROOT VIDEO_TLDPO_LORA_SCOPE; do
   if [ -n "${!NAME:-}" ]; then export "$NAME"; EXPORTS+=",$NAME"; fi
 done
 LOGDIR="$VIDEO_TLDPO_PROJECT/logs"
@@ -66,10 +73,12 @@ for DATA in "${DATASETS[@]}"; do
   for ((N=1; N<=JOBS; N++)); do
     DEPENDENCY=()
     if [ -n "$PREV" ]; then DEPENDENCY=(-W "depend=afterok:$PREV"); fi
-    JOB=$(qsub -r y -l "walltime=$WALLTIME" -N "vtdpo3_${BACKEND}_${MODE}_${DATA}_${SPLIT}" "${DEPENDENCY[@]}" -v "$EXPORTS" "$ROOT/pbs/run_unified.pbs")
+    JOB=$(qsub -r y -l "walltime=$WALLTIME" -N "${JOB_PREFIX}_${BACKEND}_${MODE}_${DATA}_${SPLIT}" "${DEPENDENCY[@]}" -v "$EXPORTS" "$ROOT/pbs/run_unified.pbs")
     printf '%s\n' "$JOB" | tee -a "$IDS"
     PREV="$JOB"
   done
 done
 echo "job_ids_file=$IDS"
-echo "Results: ${VIDEO_TLDPO_RUN_ROOT:-$VIDEO_TLDPO_PROJECT/outputs/unified_adaptive_seed_v3}/$BACKEND/"
+DEFAULT_RUN=unified_adaptive_seed_v3
+if [ "${VIDEO_TLDPO_LORA_SCOPE:-attention_projector}" = language_attention ]; then DEFAULT_RUN+=_language_attention; fi
+echo "Results: ${VIDEO_TLDPO_RUN_ROOT:-$VIDEO_TLDPO_PROJECT/outputs/$DEFAULT_RUN}/$BACKEND/"

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from video_tldpo.data.unified import load_vh
 from video_tldpo.evaluation.video_validation import file_sha256
 from video_tldpo.models.unified import identity
-from video_tldpo.unified import MODEL_NAMES, PROTOCOL_ID, SETTINGS, source_fingerprint
+from video_tldpo.unified import LORA_SCOPES, MODEL_NAMES, PROTOCOL_ID, lora_settings, source_fingerprint
 
 
 def main(argv=None):
@@ -36,6 +36,8 @@ def main(argv=None):
     p.add_argument("--train-summary", type=Path)
     p.add_argument("--output", type=Path)
     p.add_argument("--run-root", type=Path)
+    p.add_argument("--lora-scope", choices=LORA_SCOPES,
+                   default=os.environ.get("VIDEO_TLDPO_LORA_SCOPE", "attention_projector"))
     p.add_argument("--preflight-only", action="store_true")
     p.add_argument("--max-seconds", type=int, default=2700)
     p.add_argument("--deadline-epoch", type=float)
@@ -47,7 +49,8 @@ def main(argv=None):
     default_train = shared_train if shared_train.is_file() else a.artifacts / "train_binary.jsonl"
     a.canonical_train = a.canonical_train or Path(os.environ.get(
         "VIDEO_TLDPO_CANONICAL_TRAIN", str(default_train)))
-    run_root = a.run_root or Path(os.environ.get("VIDEO_TLDPO_RUN_ROOT", str(a.project / "outputs" / PROTOCOL_ID)))
+    run_name = PROTOCOL_ID + ("_language_attention" if a.lora_scope == "language_attention" else "")
+    run_root = a.run_root or Path(os.environ.get("VIDEO_TLDPO_RUN_ROOT", str(a.project / "outputs" / run_name)))
     root = run_root / a.backend
     trainout = root / "train"
     a.output = a.output or (trainout if a.command == "train" else root / (a.dataset + "_" + a.split))
@@ -66,7 +69,7 @@ def main(argv=None):
         splits, data = load_vh(a.artifacts, a.canonical_split, a.canonical_eval,
                                canonical_train=a.canonical_train if needs_train_source else None)
         canonical_train_sha256 = data.pop("canonical_train", None)
-        contract = {"protocol": PROTOCOL_ID, "settings": SETTINGS, "backend": a.backend,
+        contract = {"protocol": PROTOCOL_ID, "settings": lora_settings(a.lora_scope), "backend": a.backend,
                     "model_identity": identity(a.model, a.backend), "vh_data": data,
                     "reference_sha256": file_sha256(a.reference_margins) if a.reference_margins is not None else None,
                     "source_sha256": source_fingerprint()}

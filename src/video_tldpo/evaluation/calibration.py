@@ -175,6 +175,7 @@ def _calibrate_backend(project, run_root, backend):
                               ("adapter_calibrated_minus_base_calibrated", summary[3], summary[1])):
         deltas[label] = {key + "_pp": 100 * (left[key] - right[key]) for key in ("VH_Q_acc", "VH_pair_acc", "EH_acc")}
     report = {"status": "COMPLETED", "protocol": PROTOCOL_ID, "calibration_rule": CALIBRATION_ID,
+              "lora_scope": metadata["adapter"]["VH_VAL"]["settings"].get("lora_scope", "attention_projector"),
               "backend": backend, "selection": selection, "raw": raw, "calibrated": calibrated,
               "summary": summary, "deltas": deltas, "source_files": provenance}
     atomic_json(root / "calibration_report.json", report)

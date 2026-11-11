@@ -54,12 +54,13 @@ class PipelineTests(unittest.TestCase):
                 VIDEO_TLDPO_EVENT_ROOT=str(event), VIDEO_TLDPO_EVENT_QUESTIONS=str(event))
             env.pop("VIDEO_TLDPO_OUT", None)
             result = subprocess.run([sys.executable, str(ROOT / "scripts/submit_unified_pipeline.py"),
-                "--project", str(project), "--backends", "qwen3", "--preflight-only"],
+                "--project", str(project), "--backends", "qwen3", "--lora-scope", "language_attention", "--preflight-only"],
                 env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("records=100", result.stdout)
             self.assertIn("records=409", result.stdout)
             self.assertIn("no jobs submitted", result.stdout)
+            self.assertIn("outputs/unified_adaptive_seed_v3_language_attention", result.stdout)
             self.assertFalse((project / "outputs").exists())
             self.assertFalse((project / "logs").exists())
 
@@ -88,7 +89,7 @@ class PipelineTests(unittest.TestCase):
                 commands.append((command, env))
                 return f"{100 + len(commands)}.gadi-pbs"
             with patch.object(pipeline, "call", side_effect=qsub):
-                pipeline.submit(args, {"USER": "fixture"}, pipeline.build_plan(args.backends, 1))
+                pipeline.submit(args, {"USER": "fixture", "VIDEO_TLDPO_LORA_SCOPE": "language_attention"}, pipeline.build_plan(args.backends, 1))
                 with self.assertRaisesRegex(ValueError, "already submitted"):
                     pipeline.submit(args, {"USER": "fixture"}, pipeline.build_plan(args.backends, 1))
             self.assertEqual(len(commands), 8)
@@ -97,6 +98,13 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("depend=afterok:101.gadi-pbs:102.gadi-pbs", adapter)
             self.assertTrue(commands[-1][0][-1].endswith("calibrate_unified.pbs"))
             self.assertIn("walltime=00:30:00", commands[0][0])
+            self.assertIn("vtdpo3_la_qwen3_train_videohallucer_test", commands[0][0])
+            for command, env in commands[:-1]:
+                self.assertEqual(env["VIDEO_TLDPO_LORA_SCOPE"], "language_attention")
+                exports = command[command.index("-v") + 1].split(",")
+                self.assertIn("VIDEO_TLDPO_LORA_SCOPE", exports)
+            manifest = json.loads((args.run_root / "pipeline_jobs.json").read_text())
+            self.assertEqual(manifest["lora_scope"], "language_attention")
 
     def test_walltime_validation(self):
         self.assertEqual(pipeline.walltime_seconds("00:30:00"), 1800)

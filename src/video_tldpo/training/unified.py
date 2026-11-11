@@ -53,8 +53,17 @@ def train(args, rows, contract):
         if found:
             policy = PeftModel.from_pretrained(base, found / "adapter", is_trainable=True)
         else:
-            policy, targets = attach_lora(base, args.backend)
+            policy, targets = attach_lora(base, args.backend, args.lora_scope)
             print("lora_targets:", targets, flush=True)
+        print("lora_scope:", args.lora_scope, flush=True)
+        if args.lora_scope == "language_attention":
+            from video_tldpo.unified import lora_target_pattern, validate_language_attention_parameters
+            # A resumed adapter must also retain the exact attention-only target regex.
+            if policy.peft_config["default"].target_modules != lora_target_pattern(args.backend, args.lora_scope):
+                raise ValueError("Attention-only adapter target configuration differs")
+            validate_language_attention_parameters(
+                [name for name, parameter in policy.named_parameters() if parameter.requires_grad], args.backend)
+            print("language_attention_trainables: PASS", flush=True)
         policy.train()
         _, reference, _ = load(args.model, args.backend)
         reference.eval()

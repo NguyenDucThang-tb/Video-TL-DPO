@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from video_tldpo.unified import PROTOCOL_ID
+from video_tldpo.unified import LORA_SCOPES, PROTOCOL_ID
 
 
 def build_plan(backends, train_jobs):
@@ -112,7 +112,9 @@ def submit(args, env, plan):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         ids_file = logdir / f"unified_pipeline_{stamp}_{os.getpid()}.ids"
         manifest = {"protocol": PROTOCOL_ID, "run_root": str(args.run_root),
-            "backends": args.backends, "walltime": args.walltime, "job_ids_file": str(ids_file), "jobs": []}
+            "backends": args.backends, "walltime": args.walltime,
+            "lora_scope": env.get("VIDEO_TLDPO_LORA_SCOPE", "attention_projector"),
+            "job_ids_file": str(ids_file), "jobs": []}
         ids = {}
         for node in plan:
             job_env = dict(env, VIDEO_TLDPO_PROJECT=str(args.project),
@@ -131,7 +133,8 @@ def submit(args, env, plan):
                     (env["USER"] + ("_qwen25_vtdpo_v2.tar.gz" if backend == "qwen25" else "_video_vlm8b.tar.gz"))))
                 exports = [key for key in job_env if key.startswith("VIDEO_TLDPO_") and key != "VIDEO_TLDPO_OUT"]
                 mode = "train" if node["command"] == "train" else "base" if node["variant"] == "base" else "eval"
-                name = f"vtdpo3_{backend}_{mode}_{node['dataset']}_{node['split']}"
+                prefix = "vtdpo3_la" if env.get("VIDEO_TLDPO_LORA_SCOPE") == "language_attention" else "vtdpo3"
+                name = f"{prefix}_{backend}_{mode}_{node['dataset']}_{node['split']}"
                 command = ["qsub", "-r", "y", "-l", "walltime=" + args.walltime, "-N", name]
                 script = args.project / "pbs/run_unified.pbs"
             if node["dependencies"]:
@@ -158,12 +161,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project", type=Path, default=Path(os.environ.get("VIDEO_TLDPO_PROJECT", "/g/data/hn98/{}/Video-TL-DPO".format(os.environ.get("USER", "dd9648")))))
     parser.add_argument("--backends", nargs="+", choices=("qwen25", "qwen3", "internvl35"), default=["qwen3", "internvl35"])
-    parser.add_argument("--run-name", default=PROTOCOL_ID)
+    parser.add_argument("--run-name")
+    parser.add_argument("--lora-scope", choices=LORA_SCOPES,
+                        default=os.environ.get("VIDEO_TLDPO_LORA_SCOPE", "attention_projector"))
     parser.add_argument("--walltime", default="00:30:00")
     parser.add_argument("--train-jobs", type=int, choices=range(1, 17), default=1)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
+    if args.run_name is None:
+        args.run_name = PROTOCOL_ID + ("_language_attention" if args.lora_scope == "language_attention" else "")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", args.run_name) or args.run_name in (".", ".."):
         parser.error("run-name must be a directory name")
     if len(set(args.backends)) != len(args.backends):
@@ -171,7 +178,8 @@ def main():
     try:
         args.seconds = walltime_seconds(args.walltime)
         args.run_root = args.project / "outputs" / args.run_name
-        env = dict(os.environ, VIDEO_TLDPO_RUN_ROOT=str(args.run_root))
+        env = dict(os.environ, VIDEO_TLDPO_RUN_ROOT=str(args.run_root), VIDEO_TLDPO_LORA_SCOPE=args.lora_scope)
+        print("lora_scope: {} run_root: {}".format(args.lora_scope, args.run_root), flush=True)
         preflight(args, env)
         plan = build_plan(args.backends, args.train_jobs)
         print("pipeline_plan: GPU_jobs={} CPU_calibration_jobs=1".format(len(plan) - 1), flush=True)

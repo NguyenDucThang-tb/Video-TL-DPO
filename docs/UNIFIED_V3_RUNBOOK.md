@@ -9,6 +9,9 @@ accumulation8, 300 câu/38 optimizer steps, seed0, một epoch. Mỗi run mới 
 từ pretrained base + LoRA mới. Resume chỉ tiếp tục checkpoint cùng contract.
 Target Generation/Condition của full TL-DPO chưa được tích hợp vào runner này.
 
+Ablation chỉ LoRA language attention có tùy chọn `--lora-scope language_attention`,
+thư mục run riêng; xem [LANGUAGE_ATTENTION_ABLATION.md](LANGUAGE_ATTENTION_ABLATION.md).
+
 Không thay split: 150 train pairs/50 val pairs/155 test pairs. Dùng split.json và
 eval_vh.jsonl chung để đối chiếu membership. Theo bản mới, ưu tiên canonical
 `OPA-DPO-Video/outputs/work_binary_all/sft.jsonl` nếu file có thật. Trên Gadi file

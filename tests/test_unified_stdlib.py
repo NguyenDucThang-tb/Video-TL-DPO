@@ -10,7 +10,8 @@ import sys
 
 from video_tldpo.data.unified import load_vh, sample_id
 from video_tldpo.evaluation.unified import base_check, metrics, restore_margins
-from video_tldpo.unified import ANSWER_WORDS, PROTOCOL_ID, SETTINGS, frame_indices, lora_target_names, optimizer_budget
+from video_tldpo.unified import (ANSWER_WORDS, PROTOCOL_ID, SETTINGS, frame_indices,
+    lora_settings, lora_target_names, optimizer_budget, validate_language_attention_parameters)
 
 
 class UnifiedContractTests(unittest.TestCase):
@@ -39,6 +40,37 @@ class UnifiedContractTests(unittest.TestCase):
         self.assertEqual(lora_target_names(names, "qwen3"), [names[0], names[2], names[3]])
         iv = ["language_model.model.layers.0.self_attn.o_proj", "mlp1.1", "mlp1.3", "mlp1.0"]
         self.assertEqual(lora_target_names(iv, "internvl35"), iv[:3])
+
+    def test_language_attention_ablation_excludes_projector_vision_and_mlp(self):
+        for backend, prefix, projector in (
+                ("qwen25", "model.layers", "visual.merger.mlp.0"),
+                ("qwen3", "model.language_model.layers", "model.visual.merger.linear_fc1"),
+                ("internvl35", "language_model.model.layers", "mlp1.1")):
+            attention = [prefix + ".0.self_attn." + letter + "_proj" for letter in "qkvo"]
+            names = attention + [projector, prefix + ".0.mlp.down_proj",
+                "vision_model.encoder.layers.0.self_attn.q_proj",
+                "model.visual.layers.0.self_attn.q_proj",
+                "unrelated.layers.0.self_attn.q_proj", "lm_head"]
+            self.assertEqual(lora_target_names(names, backend, "language_attention"), attention)
+            parameters = ["base_model.model." + module + ".lora_" + side + ".default.weight"
+                          for module in attention for side in "AB"]
+            validate_language_attention_parameters(parameters, backend)
+            for wrong in ("base_model.model." + projector + ".lora_A.default.weight",
+                          "base_model.model." + attention[0] + ".weight"):
+                with self.assertRaisesRegex(ValueError, "unexpected trainable"):
+                    validate_language_attention_parameters(parameters + [wrong], backend)
+        with self.assertRaises(ValueError):
+            validate_language_attention_parameters([], "qwen3")
+        with self.assertRaises(ValueError):
+            lora_target_names([], "qwen3", "unknown")
+
+    def test_attention_ablation_changes_only_scope_in_settings(self):
+        before = dict(SETTINGS)
+        ablation = lora_settings("language_attention")
+        self.assertEqual(ablation.pop("lora_scope"), "language_attention")
+        self.assertEqual(ablation, before)
+        self.assertEqual(lora_settings(), before)
+        self.assertEqual(SETTINGS, before)
 
     def test_eventhallusion_ids_align_with_adaptive_and_opa_formats(self):
         self.assertEqual(sample_id({"id": "eh/entire_038/1|eh"}), "eh/entire/entire_038|1")
@@ -177,6 +209,9 @@ class UnifiedContractTests(unittest.TestCase):
             result = subprocess.run(args, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("UNIFIED_PREFLIGHT: PASS", result.stdout)
+            self.assertFalse((root / "outputs").exists())
+            result = subprocess.run(args + ["--lora-scope", "language_attention"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((root / "outputs").exists())
 
     def test_eval_resume_discards_uncommitted_final_record_and_rejects_changed_inputs(self):

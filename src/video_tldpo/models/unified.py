@@ -1,7 +1,7 @@
 """The same prompt, frame geometry and answer-token scoring for all three models."""
 from pathlib import Path
 
-from video_tldpo.unified import ANSWER_WORDS, LORA_PATTERNS, PROMPT_SUFFIX
+from video_tldpo.unified import ANSWER_WORDS, PROMPT_SUFFIX, lora_target_pattern
 
 
 def identity(model_dir, backend):
@@ -147,22 +147,25 @@ def answer_scores(model, batch, token_ids):
     return scores, (logits[0, token_ids[0]] - logits[0, token_ids[1]])
 
 
-def attach_lora(model, backend):
+def attach_lora(model, backend, scope="attention_projector"):
     import re
     import torch
     from peft import LoraConfig, get_peft_model
     from video_tldpo.unified import SETTINGS
+    pattern = lora_target_pattern(backend, scope)
     targets = [name for name, module in model.named_modules()
-               if isinstance(module, torch.nn.Linear) and re.fullmatch(LORA_PATTERNS[backend], name)]
-    if not any("self_attn" in name for name in targets) or not any(
+               if isinstance(module, torch.nn.Linear) and re.fullmatch(pattern, name)]
+    if not any("self_attn" in name for name in targets):
+        raise ValueError("LoRA must cover language attention; found " + repr(targets))
+    if scope == "attention_projector" and not any(
             "merger" in name or "mlp1." in name for name in targets):
         raise ValueError("Unified LoRA must cover LM attention AND visual projector; found " + repr(targets))
     config = LoraConfig(r=SETTINGS["lora_r"], lora_alpha=SETTINGS["lora_alpha"],
-        lora_dropout=SETTINGS["lora_dropout"], bias="none", target_modules=LORA_PATTERNS[backend],
+        lora_dropout=SETTINGS["lora_dropout"], bias="none", target_modules=pattern,
         task_type=None if backend == "internvl35" else "CAUSAL_LM")
     policy = get_peft_model(model, config)
     expected = {"qwen25": 10395648, "internvl35": 15597568}.get(backend)
     actual = sum(p.numel() for p in policy.parameters() if p.requires_grad)
-    if expected is not None and actual != expected:
+    if scope == "attention_projector" and expected is not None and actual != expected:
         raise ValueError("Unified LoRA parameter budget differs: expected {}, found {}".format(expected, actual))
     return policy, targets

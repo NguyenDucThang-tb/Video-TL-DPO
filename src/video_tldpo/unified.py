@@ -21,6 +21,12 @@ LORA_PATTERNS = {
     "qwen3": r"(.*\.layers\.\d+\.self_attn\.(q|k|v|o)_proj)|(.*visual\.merger\.(mlp\.(0|2)|linear_fc[12]))",
     "internvl35": r"(.*language_model\.model\.layers\.\d+\.self_attn\.(q|k|v|o)_proj)|(.*mlp1\.(1|3))",
 }
+LORA_SCOPES = ("attention_projector", "language_attention")
+LANGUAGE_ATTENTION_PATTERNS = {
+    "qwen25": r"(model\.layers|model\.language_model\.layers)\.\d+\.self_attn\.(q|k|v|o)_proj",
+    "qwen3": r"model\.language_model\.layers\.\d+\.self_attn\.(q|k|v|o)_proj",
+    "internvl35": r"language_model\.model\.layers\.\d+\.self_attn\.(q|k|v|o)_proj",
+}
 ANSWER_WORDS = {"qwen25": ("Yes", "No"), "qwen3": ("Yes", "No"),
                 "internvl35": ("Yes", "No")}
 # VH correct questions, VH correct pairs, EH correct questions.
@@ -60,5 +66,29 @@ def frame_indices(total):
     return [round(i * (total - 1) / 7) for i in range(8)]
 
 
-def lora_target_names(names, backend):
-    return [name for name in names if re.fullmatch(LORA_PATTERNS[backend], name)]
+def lora_target_pattern(backend, scope="attention_projector"):
+    if scope not in LORA_SCOPES:
+        raise ValueError("Unknown LoRA scope: " + str(scope))
+    return (LANGUAGE_ATTENTION_PATTERNS if scope == "language_attention" else LORA_PATTERNS)[backend]
+
+
+def lora_target_names(names, backend, scope="attention_projector"):
+    pattern = lora_target_pattern(backend, scope)
+    return [name for name in names if re.fullmatch(pattern, name)]
+
+
+def lora_settings(scope="attention_projector"):
+    # Keep the full configuration intact; the ablation changes only the target modules.
+    lora_target_pattern("qwen3", scope)
+    settings = dict(SETTINGS)
+    if scope != "attention_projector":
+        settings["lora_scope"] = scope
+    return settings
+
+
+def validate_language_attention_parameters(names, backend):
+    """Fail closed if PEFT makes anything except LM attention LoRA trainable."""
+    pattern = r"base_model\.model\.({})\.lora_[AB]\.default\.weight".format(
+        LANGUAGE_ATTENTION_PATTERNS[backend])
+    if not names or any(not re.fullmatch(pattern, name) for name in names):
+        raise ValueError("Attention-only run contains unexpected trainable parameters")

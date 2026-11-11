@@ -10,7 +10,7 @@ import sys
 
 from video_tldpo.data.unified import load_vh, sample_id
 from video_tldpo.evaluation.unified import base_check, metrics, restore_margins
-from video_tldpo.unified import ANSWER_WORDS, SETTINGS, frame_indices, lora_target_names, optimizer_budget
+from video_tldpo.unified import ANSWER_WORDS, PROTOCOL_ID, SETTINGS, frame_indices, lora_target_names, optimizer_budget
 
 
 class UnifiedContractTests(unittest.TestCase):
@@ -27,6 +27,9 @@ class UnifiedContractTests(unittest.TestCase):
         self.assertEqual(ANSWER_WORDS["qwen3"], ("Yes", "No"))
         self.assertEqual(ANSWER_WORDS["qwen25"], ("Yes", "No"))
         self.assertEqual(SETTINGS["weight_decay"], 0)
+        self.assertEqual(PROTOCOL_ID, "unified_adaptive_seed_v3")
+        self.assertEqual(SETTINGS["initialization"], "pretrained_base_new_lora")
+        self.assertEqual(SETTINGS["objective"], "vanilla_dpo_answer_token")
 
     def test_attention_and_projector_selected_but_language_mlp_excluded(self):
         names = ["model.language_model.layers.0.self_attn.q_proj",
@@ -62,7 +65,7 @@ class UnifiedContractTests(unittest.TestCase):
             (root / name).write_text("".join(json.dumps(r) + "\n" for r in rows))
         (root / "split.json").write_text(json.dumps(ids))
         (root / "eval_vh.jsonl").write_text("".join(json.dumps(r) + "\n" for r in splits["val"] + splits["test"]))
-            (root / "sft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in splits["train"]))
+        (root / "sft.jsonl").write_text("".join(json.dumps(r) + "\n" for r in splits["train"]))
         return ids, splits
 
     def test_canonical_membership_not_just_containment_in_all_predictions(self):
@@ -118,7 +121,7 @@ class UnifiedContractTests(unittest.TestCase):
             self.assertEqual(base_check(changed, metrics(changed, 310), "qwen3", "videohallucer",
                                         path, {})["status"], "FAIL")
 
-    def test_submission_is_a_real_one_hour_resume_chain_and_preflight_does_not_submit(self):
+    def test_submission_uses_resume_chain_and_preflight_does_not_submit(self):
         script = Path(__file__).resolve().parents[1] / "scripts/submit_unified.sh"
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
@@ -150,7 +153,7 @@ class UnifiedContractTests(unittest.TestCase):
             self.assertIn("depend=afterok:123.gadi-pbs", submitted[1])
             self.assertTrue(all("run_unified.pbs" in line and "-v VIDEO_TLDPO_PROJECT" in line for line in submitted))
 
-    def test_actual_preflight_needs_no_ml_libraries_and_training_requires_verified_base(self):
+    def test_actual_preflight_needs_no_ml_libraries_and_training_can_precede_base(self):
         script = Path(__file__).resolve().parents[1] / "scripts/run_unified.py"
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
@@ -188,6 +191,14 @@ class UnifiedContractTests(unittest.TestCase):
             self.assertEqual(restore_margins(path, [row]), [row])
             with self.assertRaisesRegex(ValueError, "canonical samples"):
                 restore_margins(path, [dict(row, question="changed")])
+
+    def test_eventhallusion_cannot_be_selected_as_validation(self):
+        script = Path(__file__).resolve().parents[1] / "scripts/run_unified.py"
+        result = subprocess.run([sys.executable, str(script), "evaluate", "--backend", "qwen3",
+                                 "--dataset", "eventhallusion", "--split", "val", "--preflight-only"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("only the complete evaluation set", result.stderr)
 
 
 if __name__ == "__main__":

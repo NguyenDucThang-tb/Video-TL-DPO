@@ -9,18 +9,22 @@ The executable settings live in `src/video_tldpo/unified.py`.
 
 ```bash
 cd /g/data/hn98/$USER/Video-TL-DPO
-bash scripts/submit_unified.sh base qwen3 --preflight-only
-bash scripts/submit_unified.sh base qwen3
-# Training can run before base evaluation; run base checks before reporting comparisons.
-bash scripts/submit_unified.sh train qwen3 --jobs 2
-# After the unified 300-record / 38-step training completes:
-bash scripts/submit_unified.sh eval qwen3
+bash scripts/submit_unified_pipeline.sh --backends qwen3 internvl35 --preflight-only
+bash scripts/submit_unified_pipeline.sh --backends qwen3 internvl35 --walltime 00:30:00
 ```
 
 Use `qwen25` or `internvl35` for the other backbones. PBS extracts the existing
-Conda archive into JobFS and writes persistent artifacts to GData. Base checks
-validate canonical sample membership and per-sample predictions before training.
+Conda archive into JobFS and writes persistent artifacts to GData. Preflight
+validates canonical sample membership. Base checks require the reference aggregate
+counts before reporting, with per-sample reference margins as diagnostics.
 All submission commands are manual; acceptance is not completion.
+
+The [v3 runbook](docs/UNIFIED_V3_RUNBOOK.md) explains paths and job dependencies.
+Protocol v3 evaluates VH_VAL for both base and adapter, then fits each threshold
+using only VH_VAL. It applies that fixed threshold to VH_TEST and EventHallusion
+and exports both raw and calibrated tables to `outputs/unified_adaptive_seed_v3/results.csv`.
+Earlier v2 outputs are preserved. Each fresh run starts from the original model
+and a new LoRA, not another method's trained adapter.
 
 The pipeline above trains Vanilla DPO with the shared student budget. The
 Target Generation and Target Condition losses remain research components;
@@ -32,6 +36,7 @@ Local contract checks, without optional ML packages:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_unified*.py' -v
+PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_calibration.py' -v
 ```
 
 Model execution, numerical base reproduction and GPU resume require real Gadi

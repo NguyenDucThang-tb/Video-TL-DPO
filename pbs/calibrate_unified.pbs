@@ -1,0 +1,14 @@
+#!/bin/bash
+#PBS -N vtdpo3_calibration
+#PBS -P hn98
+#PBS -q normal
+#PBS -l ncpus=1,mem=2GB,jobfs=1GB,walltime=00:10:00
+#PBS -l storage=gdata/hn98
+#PBS -j oe
+
+set -euo pipefail
+PROJECT=${VIDEO_TLDPO_PROJECT:-/g/data/hn98/$USER/Video-TL-DPO}
+mkdir -p "/g/data/hn98/$USER/logs"
+exec > "/g/data/hn98/$USER/logs/unified_calibration_${PBS_JOBID}.log" 2>&1
+IFS=: read -r -a BACKENDS <<< "${VIDEO_TLDPO_BACKENDS:-qwen3:internvl35}"
+python3 "$PROJECT/scripts/calibrate_unified.py" --project "$PROJECT" --backends "${BACKENDS[@]}"

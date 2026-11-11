@@ -2,7 +2,8 @@
 import math
 import re
 
-PROTOCOL_ID = "unified_adaptive_seed_v2"
+PROTOCOL_ID = "unified_adaptive_seed_v3"
+CALIBRATION_ID = "vh_val_midpoints_qacc_nearest_zero_v1"
 PROMPT_SUFFIX = "\nAnswer with yes or no."
 SETTINGS = {
     "protocol": PROTOCOL_ID, "frames": 8, "resolution": 448,
@@ -11,6 +12,8 @@ SETTINGS = {
     "epochs": 1, "batch_size": 1, "grad_accum": 8, "clip_grad_norm": 1.0,
     "scheduler": "cosine", "warmup_fraction": 0.05,
     "response_target": "answer_token_only", "checkpoint_selection": "last_epoch",
+    "initialization": "pretrained_base_new_lora",
+    "objective": "vanilla_dpo_answer_token",
     "dataset_revision": "c93475bf1be466c1af90d005749ccb4e6b3ad066",
 }
 LORA_PATTERNS = {
@@ -34,7 +37,9 @@ def source_fingerprint():
     root = package.parents[1]
     files = [package / "unified.py"] + [package / name / "unified.py" for name in (
         "data", "models", "training", "evaluation")] + [root / "scripts/run_unified.py",
-        root / "scripts/train_videohallucer_vanilla_resumable.py"]
+        root / "scripts/train_videohallucer_vanilla_resumable.py",
+        package / "evaluation/calibration.py", package / "evaluation/eventhallusion.py",
+        package / "evaluation/video_validation.py"]
     digest = hashlib.sha256()
     for file in files:
         digest.update(str(file.relative_to(root)).encode())

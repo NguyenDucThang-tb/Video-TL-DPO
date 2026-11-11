@@ -35,6 +35,7 @@ def main(argv=None):
     p.add_argument("--adapter", type=Path)
     p.add_argument("--train-summary", type=Path)
     p.add_argument("--output", type=Path)
+    p.add_argument("--run-root", type=Path)
     p.add_argument("--preflight-only", action="store_true")
     p.add_argument("--max-seconds", type=int, default=2700)
     p.add_argument("--deadline-epoch", type=float)
@@ -42,9 +43,12 @@ def main(argv=None):
     a = p.parse_args(argv)
     a.model = a.model or home / "models" / MODEL_NAMES[a.backend]
     a.artifacts = a.artifacts or a.project / "artifacts"
+    shared_train = canonical / "work_binary_all/sft.jsonl"
+    default_train = shared_train if shared_train.is_file() else a.artifacts / "train_binary.jsonl"
     a.canonical_train = a.canonical_train or Path(os.environ.get(
-        "VIDEO_TLDPO_CANONICAL_TRAIN", str(a.artifacts / "train_binary.jsonl")))
-    root = a.project / "outputs" / PROTOCOL_ID / a.backend
+        "VIDEO_TLDPO_CANONICAL_TRAIN", str(default_train)))
+    run_root = a.run_root or Path(os.environ.get("VIDEO_TLDPO_RUN_ROOT", str(a.project / "outputs" / PROTOCOL_ID)))
+    root = run_root / a.backend
     trainout = root / "train"
     a.output = a.output or (trainout if a.command == "train" else root / (a.dataset + "_" + a.split))
     a.adapter = a.adapter or trainout / "trainer_state/latest/adapter"
@@ -55,6 +59,8 @@ def main(argv=None):
         a.reference_margins = candidate if candidate.is_file() else None
     if a.max_seconds <= 120 or a.save_every < 1:
         p.error("max-seconds must exceed 120; save-every must be positive")
+    if a.dataset == "eventhallusion" and a.split != "test":
+        p.error("EventHallusion has only the complete evaluation set; use --split test")
     try:
         needs_train_source = a.command == "train" or (a.command == "evaluate" and a.variant == "adapter")
         splits, data = load_vh(a.artifacts, a.canonical_split, a.canonical_eval,
@@ -66,6 +72,7 @@ def main(argv=None):
                     "source_sha256": source_fingerprint()}
         if canonical_train_sha256 is not None:
             contract["canonical_train_sha256"] = canonical_train_sha256
+            print("train_source:", a.canonical_train, "sha256=" + canonical_train_sha256, flush=True)
         if a.command == "train":
             rows = splits["train"]
         else:
@@ -75,6 +82,10 @@ def main(argv=None):
                 rows, event = load_eventhallusion(a.dataset_root, a.questions_dir)
                 if event["counts"]["eventhallusion_records"] != 409:
                     raise ValueError("Unified EventHallusion requires all 409 questions")
+                train_videos = {str(Path(row["video_path"]).resolve()) for row in splits["train"]}
+                if train_videos & {str(Path(row["video_path"]).resolve()) for row in rows}:
+                    raise ValueError("EventHallusion video path overlaps the train split")
+                event["counts"]["train_video_path_overlap"] = 0
                 contract["event_data"] = event
             else:
                 rows = splits[a.split]

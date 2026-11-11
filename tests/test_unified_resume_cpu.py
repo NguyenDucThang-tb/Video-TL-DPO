@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from video_tldpo.unified import PROTOCOL_ID
 
 ML_AVAILABLE = all(importlib.util.find_spec(n) is not None for n in ("torch", "numpy", "safetensors"))
 
@@ -60,7 +61,7 @@ class UnifiedResumeTests(unittest.TestCase):
         expected_losses = updates(full, fo, fs, 24)
         first, opt, sched = setup()
         losses = updates(first, opt, sched, 8)
-    contract = {"protocol": "unified_adaptive_seed_v2"}
+        contract = {"protocol": PROTOCOL_ID}
         state = {"next_record_index": 8, "optimizer_steps": 1, "order": list(range(24)),
                  "losses": losses, "contract": contract}
         with tempfile.TemporaryDirectory() as name:

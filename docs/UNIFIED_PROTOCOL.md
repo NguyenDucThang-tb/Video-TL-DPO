@@ -1,5 +1,9 @@
 # Unified experiment protocol
 
+Current protocol: **unified_adaptive_seed_v3**, including VH_VAL-only threshold
+calibration from section 9 of the latest reference. Use the complete
+[v3 runbook](UNIFIED_V3_RUNBOOK.md) for training/evaluation/calibration submission.
+
 The executable source of settings is `src/video_tldpo/unified.py`. All operational
 PBS/submit entry points use `scripts/run_unified.py`; YAML files are snapshots,
 not overrides of this contract. `UNIFIED_CONFIG_REFERENCE.md` contains the
@@ -13,8 +17,10 @@ does not claim the target-generation/target-condition method has been trained.
 
 Preflight reads OPA `outputs/data/split.json` and `outputs/data/eval_vh.jsonl`
 only as the shared sample split and validation/test manifest. Video-TL-DPO is a
-separate experiment: its actual train source is its own
-`artifacts/train_binary.jsonl`, not OPA's experiment-specific SFT output. The
+separate experiment: use the shared `work_binary_all/sft.jsonl` if it exists,
+otherwise its existing `artifacts/train_binary.jsonl`. Both are data exports of
+the same 300 fixed train questions, not another method's adapter. An explicit
+VIDEO_TLDPO_CANONICAL_TRAIN can keep the project-owned source fixed. The
 loader binds every local train row to the fixed train pair IDs and checks its
 question, answer and video against the same prepared Video-TL-DPO artifact. It
 validates actual train/val/test pair membership,
@@ -62,11 +68,12 @@ is divided by 8. Checkpoints are saved only after complete accumulation groups.
 They include optimizer, scheduler, sample order/cursor, step counter, and RNG.
 Contracts also fingerprint the runtime source, processor files, model identity
 and canonical data, so changing code or data invalidates old resume state.
-A one-hour job pauses cleanly; an afterok chain continues the same run.
+A 30-minute job pauses before its requested walltime; an afterok chain continues
+the same run. Start every new experiment from base + new LoRA in a new run root.
 
 Canonical base counts are Qwen2.5 `230/310`, `78/155`, `270/409`; Qwen3
 `235/310`, `89/155`, `264/409`; InternVL `212/310`, `66/155`, `198/409`.
-Outputs live under `outputs/unified_adaptive_seed_v2/<backend>/`. Old runs are
+Outputs live under `outputs/unified_adaptive_seed_v3/<backend>/`. Old runs are
 preserved, and changed contracts/legacy checkpoints are refused. The old
 resumable module retains legacy helper functions for artifact regressions;
 its command-line entry now routes to the unified runner. The generic
@@ -110,7 +117,7 @@ bash scripts/submit_unified.sh train qwen3 --preflight-only
 bash scripts/submit_unified.sh train qwen3 --jobs 2
 ```
 
-Replace qwen3 with qwen25 or internvl35. `--jobs 2` is a sequential one-hour
+Replace qwen3 with qwen25 or internvl35. `--jobs 2` is a sequential 30-minute
 checkpoint-resume chain, not independent training shards. The default is one
 job to avoid queuing many empty jobs. Completion requires Exit_status=0 and
 `train_summary.json` with COMPLETED, records=300, optimizer_steps=38.
@@ -136,13 +143,31 @@ VIDEO_TLDPO_CANONICAL_EVAL and VIDEO_TLDPO_CANONICAL_TRAIN. Model/env overrides
 remain VIDEO_TLDPO_MODEL and VIDEO_TLDPO_ARCHIVE. Use `--backend` + the CLI
 `--reference-margins` option to inspect a different canonical reference explicitly.
 
+## Validation threshold calibration
+
+The full pipeline also evaluates both base and adapter on VH_VAL. It selects a
+separate t for each variant using only the 100 VH_VAL questions: maximize q_acc
+over 0 and adjacent sorted-margin midpoints, breaking ties by nearest zero.
+The same t is then used unchanged for VH_TEST and all EventHallusion questions.
+Raw metrics and margin files are preserved. `calibrate_unified.py` exports raw
+and calibrated results, per-variant thresholds and shared id/margin JSONL.
+
+```bash
+bash scripts/submit_unified_pipeline.sh --backends qwen3 internvl35 --preflight-only
+bash scripts/submit_unified_pipeline.sh --backends qwen3 internvl35 --walltime 00:30:00
+```
+
+The pipeline uses afterok dependencies and finishes with a CPU calibration job.
+It refuses to submit the same run twice. Choose a new --run-name for an independent
+fresh run, or --resume for an interrupted run after old jobs have stopped.
+
 ## Local evidence boundary
 
 Contract regressions: `PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_unified*.py' -v`.
 The numeric CPU resume regression is skipped unless Torch, NumPy and safetensors
 are installed; run it again from the packed Gadi environment.
 The tests check canonical split membership/content, repeated short-video
-sampling, LoRA selection, budget rounding and prediction-level base validation. They do
+sampling, LoRA selection, budget rounding and base-count/diagnostic validation. They do
 not load models. GPU forward/backward, numerical base reproduction, parameter
 counts, real canonical schemas and checkpoint resume remain to be verified by
 Gadi logs. Existing historical metrics remain results of the old protocol.

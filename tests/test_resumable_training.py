@@ -211,7 +211,7 @@ def test_legacy_chain_alias_forwards_jobs_and_preflight(tmp_path):
 
 def test_default_pbs_uses_packaged_env_and_unified_entrypoint():
     script = (ROOT / "pbs/run_unified.pbs").read_text()
-    assert "walltime=01:00:00" in script
+    assert "walltime=00:30:00" in script
     assert "storage=gdata/hn98+scratch/hn98+scratch/jp09" in script
     assert '"$ENV_ROOT/bin/python" "$ENV_ROOT/bin/conda-unpack"' in script
     assert '"$PROJECT/scripts/run_unified.py"' in script

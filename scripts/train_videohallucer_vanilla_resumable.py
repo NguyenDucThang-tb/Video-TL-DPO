@@ -260,7 +260,7 @@ def find_checkpoint(checkpoint_root: Path, contract: dict, records: int) -> Path
             for key in ("rng", "optimizer", "trainable_names"):
                 if key not in payload:
                     raise ValueError(f"Missing checkpoint field: {key}")
-            if state["contract"].get("protocol") == "unified_adaptive_seed_v2" and payload.get("scheduler") is None:
+            if metadata["contract"].get("protocol", "").startswith("unified_adaptive_seed_") and payload.get("scheduler") is None:
                 raise ValueError("Unified checkpoint lacks scheduler state")
             if not (path / "adapter/adapter_model.safetensors").is_file():
                 raise ValueError("Adapter weights are missing")

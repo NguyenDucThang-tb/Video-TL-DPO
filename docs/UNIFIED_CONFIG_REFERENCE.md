@@ -10,7 +10,8 @@ và kiểm tra base ra **đúng** các số ở mục 6. Nếu lệch thì pipel
 không so sánh được với các phương pháp khác.
 
 Bảng kết quả gồm một dòng **Base** (mô hình gốc, không train), rồi mỗi dòng sau là mô hình gốc + một
-phương pháp, chấm trên cùng 3 cột: VH Q acc, VH pair acc, EH acc.
+phương pháp, chấm trên cùng 3 cột: VH Q acc, VH pair acc, EH acc. Bảng phụ báo cáo các cột đó sau khi
+hiệu chỉnh ngưỡng (mục 9), để tách phần tăng nhờ sửa thiên lệch yes/no khỏi phần tăng thật.
 
 ## 1. Dữ liệu
 
@@ -119,8 +120,20 @@ InternVL3.5: (.*language_model\.model\.layers\.\d+\.self_attn\.(q|k|v|o)_proj)|(
 Số tham số train được: 10,395,648 với Qwen2.5-VL; 15,597,568 với InternVL3.5.
 
 Hàm loss do từng phương pháp quy định, và phải ghi rõ trong báo cáo, cùng β và các hệ số riêng. Với
-phương pháp dạng DPO, reference là mô hình gốc. Các baseline yes/no của OPA-DPO-Video (SFT yes/no,
-DPO yes/no, β = 0.1) chỉ tính loss trên token đáp án, đúng token được chấm ở mục 4.
+phương pháp dạng DPO, reference là mô hình gốc.
+
+Mọi phương pháp đều **bắt đầu từ mô hình gốc** với một LoRA mới, không train nối tiếp từ checkpoint của
+phương pháp khác:
+
+| Dòng | Điểm xuất phát | Học từ đâu |
+|---|---|---|
+| SFT yes/no | mô hình gốc + LoRA mới | 100% nhãn đúng "Yes"/"No", CE chỉ trên token đáp án (nhánh `sft_gt` của Adaptive-SEED) |
+| DPO yes/no | mô hình gốc + LoRA mới, reference = mô hình gốc | cặp (nhãn đúng, nhãn sai), β = 0.1, log-prob chỉ trên token đáp án |
+| Adaptive-SEED | mô hình gốc + LoRA mới | CE trên nhãn đúng (90%) hoặc nhãn lấy mẫu từ teacher (10%) + RKL tới target teacher; teacher là chính mô hình gốc |
+| TL-DPO, OPA-DPO, ... | mô hình gốc + LoRA mới | theo phương pháp |
+
+SFT yes/no là Adaptive-SEED khi bỏ phần teacher (cùng dữ liệu, cùng budget), nên SEED − SFT là phần
+đóng góp của teacher.
 
 ## 8. Chấm checkpoint bằng script chung
 
@@ -136,4 +149,44 @@ qsub -l walltime=00:30:00,mem=64GB,jobfs=10GB \
 
 `MODEL` là `qwen25`, `qwen3` hoặc `internvl`. Với `qwen25` thì bỏ `ENV_NAME` và `VENV`.
 Kết quả nằm ở `/g/data/hn98/dd9648/OPA-DPO-Video/outputs/eval/<NAME>/results.csv`, gồm cả
-`wrong_to_correct` và `correct_to_wrong` so với base của cùng backbone.
+`wrong_to_correct` và `correct_to_wrong` so với base của cùng backbone. Margin từng câu nằm ở
+`margins.jsonl` cùng thư mục, dùng cho mục 9.
+
+## 9. Hiệu chỉnh ngưỡng (tách phần sửa thiên lệch yes/no)
+
+Một phần lớn mức tăng sau train có thể chỉ do model đổi tỉ lệ trả lời "yes", không phải hiểu video tốt
+hơn. Ví dụ InternVL3.5 base trả lời "yes" 71% số câu VH_TEST trong khi chỉ 50% đáp án là "yes", nên nó
+sai câu "no" trong rất nhiều cặp và pair acc chỉ 0.4258. Hiệu chỉnh ngưỡng đo phần tăng này.
+
+**Cách làm**
+1. Giữ nguyên model và margin của từng câu. Thay quy tắc "yes khi margin > 0" bằng
+   **"yes khi margin > t"**.
+2. Chọn t trên **VH_VAL**: lấy t cho q_acc trên VH_VAL cao nhất; nếu nhiều t bằng nhau, lấy t gần 0
+   nhất. Các t được thử là 0 và các điểm giữa hai margin liên tiếp của VH_VAL.
+3. Áp **nguyên** t đó lên VH_TEST và EventHallusion, rồi tính lại VH Q acc, VH pair acc, EH acc và
+   yes_rate.
+
+Việc này tương đương cộng một hằng số vào logit "No" cho mọi câu: một mô hình chỉ có 1 tham số, chọn
+trên tập val, không dùng test.
+
+**Cách đọc**
+
+| So sánh | Ý nghĩa |
+|---|---|
+| Base đã hiệu chỉnh − Base | phần tăng chỉ nhờ sửa thiên lệch yes/no |
+| Phương pháp − Base đã hiệu chỉnh | phần tăng vượt quá việc sửa thiên lệch |
+| Phương pháp đã hiệu chỉnh − Base đã hiệu chỉnh | so sánh khi cả hai đã cùng hiệu chỉnh |
+
+Mỗi phương pháp báo cáo thêm một dòng đã hiệu chỉnh và ngưỡng t của nó.
+
+**Công cụ** (login node, vài giây, không tốn SU): đọc `margins.jsonl` của các run trong
+`/g/data/hn98/dd9648/OPA-DPO-Video/outputs/eval/`:
+
+```bash
+cd /scratch/hn98/dd9648/OPA-DPO-Video && bash scripts/gadi/calibrate.sh base binary_sft_full tldpo_qwen25
+```
+
+Không truyền tên run thì script chạy cho mọi run. Kết quả ghi vào `<run>/calibrated.csv` và
+`calibration_summary.csv`. Run chấm bằng pipeline khác thì cần xuất margin
+`logit("Yes") − logit("No")` theo id câu hỏi cùng định dạng (`{"id": ..., "margin": ...}` mỗi dòng)
+để dùng được script này.

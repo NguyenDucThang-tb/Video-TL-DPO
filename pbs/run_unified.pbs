@@ -2,7 +2,7 @@
 #PBS -N vtdpo_unified
 #PBS -P hn98
 #PBS -q gpuhopper
-#PBS -l ngpus=1,ncpus=12,mem=64GB,jobfs=24GB,walltime=01:00:00
+#PBS -l ngpus=1,ncpus=12,mem=64GB,jobfs=24GB,walltime=00:30:00
 #PBS -l storage=gdata/hn98+scratch/hn98+scratch/jp09
 #PBS -j oe
 
@@ -39,7 +39,7 @@ export PYTHONPATH="$PROJECT/src:$PROJECT/scripts"
 hostname
 nvidia-smi
 ARGS=("$COMMAND" --backend "$BACKEND" --project "$PROJECT" --dataset "$DATASET" --split "$SPLIT" --variant "$VARIANT"
-      --max-seconds 2700 --deadline-epoch "$((START + 2700))")
+      --max-seconds "$((${VIDEO_TLDPO_JOB_SECONDS:-1800} - 180))" --deadline-epoch "$((START + ${VIDEO_TLDPO_JOB_SECONDS:-1800} - 180))")
 if [ -n "${VIDEO_TLDPO_MODEL:-}" ]; then ARGS+=(--model "$VIDEO_TLDPO_MODEL"); fi
 if [ -n "${VIDEO_TLDPO_OUT:-}" ]; then ARGS+=(--output "$VIDEO_TLDPO_OUT"); fi
 if [ -n "${VIDEO_TLDPO_EVENT_QUESTIONS:-}" ]; then ARGS+=(--questions-dir "$VIDEO_TLDPO_EVENT_QUESTIONS"); fi

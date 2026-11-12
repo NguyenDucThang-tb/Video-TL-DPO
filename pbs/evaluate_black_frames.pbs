@@ -3,7 +3,8 @@
 #PBS -P hn98
 #PBS -q gpuhopper
 #PBS -l ngpus=1,ncpus=12,mem=64GB,jobfs=24GB,walltime=00:30:00
-#PBS -l storage=gdata/hn98+scratch/hn98
+# PBS jobs need the dataset mount on scratch/jp09 as well as project GData.
+#PBS -l storage=gdata/hn98+scratch/hn98+scratch/jp09
 #PBS -j oe
 
 set -euo pipefail
